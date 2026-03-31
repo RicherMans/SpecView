@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SpecView - Spectrogram Player</title>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
 <style>
 :root {
   --bg: #f0f0f0;
@@ -261,6 +262,42 @@ body {
 .tag-b { background: rgba(239,68,68,0.12); color: var(--red); }
 .tag-c { background: rgba(34,197,94,0.12); color: var(--green); }
 .tag-d { background: rgba(245,158,11,0.12); color: var(--orange); }
+
+/* ===== ANALYSIS STRIP ===== */
+.analysis-strip {
+  position: relative;
+  min-height: 18px;
+  background: #111;
+  border-top: 1px solid #333;
+  overflow: hidden;
+  font-size: 0;
+}
+.analysis-strip.empty { display: none; }
+.analysis-row {
+  display: flex; position: relative; height: 16px;
+}
+.analysis-tag {
+  position: absolute; height: 14px; top: 1px;
+  border-radius: 2px; font-size: 8px; font-weight: 600;
+  line-height: 14px; padding: 0 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  cursor: default; transition: opacity .15s;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.analysis-tag:hover { opacity: 0.8; }
+.analysis-progress {
+  font-size: 10px; color: #aaa; padding: 3px 8px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+}
+.btn-analyze {
+  font-size: 10px; padding: 2px 8px; margin-left: 4px;
+  background: #2a2a3a; color: #a5b4fc; border: 1px solid #444;
+  border-radius: 3px; cursor: pointer; font-family: inherit;
+  transition: all .12s;
+}
+.btn-analyze:hover { background: #3a3a5a; border-color: #666; }
+.btn-analyze:disabled { opacity: 0.4; cursor: default; }
 /* ===== FULL-PAGE DROP OVERLAY ===== */
 .drop-overlay {
   position: fixed; inset: 0; z-index: 999;
@@ -765,27 +802,39 @@ function mkTrack(name, buffer, nativeSR) {
   const ny = displaySR / 2;                           // native Nyquist (display + render limit)
   return {
     id, name, buffer, duration:dur, nyquist:ny, sr:displaySR, nativeSR:displaySR, renderSR,
-    canvas:null, wrapper:null, ph:null, laneLabel:null,
+    canvas:null, wrapper:null, ph:null, laneLabel:null, analysisStrip:null, analyzeBtn:null,
     playing:false, startTime:0, offset:0, source:null,
-    groupId:null, el:null
+    groupId:null, el:null, analysisResults:null
   };
 }
 
 function buildSpecBody(track, h) {
   const el = document.createElement('div');
   el.className = 'track-body';
-  el.innerHTML =
+  el.style.flexDirection = 'column';
+  const specRow = document.createElement('div');
+  specRow.style.cssText = 'display:flex;flex:1;min-height:0';
+  specRow.innerHTML =
     '<div class="freq-labels" style="height:'+h+'px"></div>'+
     '<div class="spec-wrapper" style="height:'+h+'px">'+
       '<canvas height="'+h+'"></canvas>'+
       '<div class="playhead" style="left:0"></div>'+
       '<div class="loading-overlay"><div class="spinner"></div>Rendering...</div>'+
     '</div>';
-  track.canvas  = el.querySelector('canvas');
-  track.wrapper = el.querySelector('.spec-wrapper');
-  track.ph      = el.querySelector('.playhead');
-  addFreqLabels(el.querySelector('.freq-labels'), track.nyquist);
-  const loading = el.querySelector('.loading-overlay');
+  el.appendChild(specRow);
+
+  /* Analysis results strip (hidden until analysis runs) */
+  const strip = document.createElement('div');
+  strip.className = 'analysis-strip empty';
+  strip.style.paddingLeft = '44px'; /* align with spec (past freq-labels) */
+  el.appendChild(strip);
+  track.analysisStrip = strip;
+
+  track.canvas  = specRow.querySelector('canvas');
+  track.wrapper = specRow.querySelector('.spec-wrapper');
+  track.ph      = specRow.querySelector('.playhead');
+  addFreqLabels(specRow.querySelector('.freq-labels'), track.nyquist);
+  const loading = specRow.querySelector('.loading-overlay');
 
   track.wrapper.addEventListener('click', e => {
     const rect = track.canvas.getBoundingClientRect();
@@ -857,10 +906,13 @@ function createStandalone(name, buffer, nativeSR) {
   hdr.className = 'card-header';
   hdr.innerHTML =
     '<span class="card-title" title="'+esc(name)+'">'+esc(name)+'</span>'+
+    '<button class="btn-analyze" title="Run audio classification">Analyze</button>'+
     '<span class="card-info">'+chL+' '+(t.sr/1000).toFixed(1)+'kHz | '+fmt(t.duration)+'</span>'+
     '<button class="card-remove" title="Remove">&times;</button>';
   hdr.addEventListener('click', () => setActive(t.id));
   hdr.querySelector('.card-remove').addEventListener('click', e => { e.stopPropagation(); removeTrack(t.id); });
+  hdr.querySelector('.btn-analyze').addEventListener('click', e => { e.stopPropagation(); runAnalysis(t); });
+  t.analyzeBtn = hdr.querySelector('.btn-analyze');
   card.appendChild(hdr);
   card.appendChild(buildSpecBody(t, SPEC_H));
   card.appendChild(buildRuler(t.duration));
@@ -922,9 +974,12 @@ function createDiffGroup(baseName, items) {
     lbl.innerHTML =
       '<span class="diff-lane-tag '+tagCls+'">'+esc(tagText)+'</span>'+
       '<span class="diff-lane-name">'+esc(item.name)+'</span>'+
+      '<button class="btn-analyze" title="Run audio classification">Analyze</button>'+
       '<span class="card-info">'+(t.sr/1000).toFixed(1)+'kHz</span>'+
       '<span class="diff-lane-playing"></span>';
     lbl.addEventListener('click', () => { setActive(t.id); updateLaneHighlights(); });
+    lbl.querySelector('.btn-analyze').addEventListener('click', e => { e.stopPropagation(); runAnalysis(t); });
+    t.analyzeBtn = lbl.querySelector('.btn-analyze');
     lane.appendChild(lbl);
     t.laneLabel = lbl;
 
@@ -1166,6 +1221,364 @@ function updatePlayBtn(p){ playIcon.innerHTML=p?'&#10074;&#10074;':'&#9654;'; pl
 function fmt(s){ if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60),sc=s%60; return m+':'+(sc<10?'0':'')+sc.toFixed(3); }
 function fmtShort(s){ if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60),sc=s%60; return m>0?m+':'+(sc<10?'0':'')+sc.toFixed(1):sc.toFixed(1)+'s'; }
 function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+/* ========================================================================
+ *  AUDIO ANALYSIS — CED-tiny (AudioSet 527 labels)
+ *  Uses ONNX Runtime Web to run mispeech/ced-tiny on 960ms chunks.
+ *  Model input: raw waveform [1, N] at 16kHz
+ *  Model output: 527 logits → sigmoid → probabilities
+ * ======================================================================== */
+const CED_MODEL_PATH = 'mispeech/ced-tiny/resolve/main/model.onnx';
+const CED_MIRRORS = [
+  'https://huggingface.co/',
+  'https://hf-mirror.com/'
+];
+const CED_SR = 16000;
+const CED_CHUNK_SEC = 0.96;
+const CED_CHUNK_SAMPLES = Math.round(CED_SR * CED_CHUNK_SEC);
+const CED_THRESHOLD = 0.5;
+
+/* AudioSet 527 labels (id → label) */
+const AUDIOSET_LABELS = [
+"Speech","Male speech","Female speech","Child speech","Conversation","Narration","Babbling","Speech synthesizer","Shout","Bellow","Whoop","Yell","Battle cry","Children shouting","Screaming","Whispering","Laughter","Baby laughter","Giggle","Snicker","Belly laugh","Chuckle","Crying","Baby cry","Whimper","Wail","Sigh","Singing","Choir","Yodeling","Chant","Mantra","Male singing","Female singing","Child singing","Synthetic singing","Rapping","Humming","Groan","Grunt","Whistling","Breathing","Wheeze","Snoring","Gasp","Pant","Snort","Cough","Throat clearing","Sneeze","Sniff","Run","Shuffle","Walk","Chewing","Biting","Gargling","Stomach rumble","Burping","Hiccup","Fart","Hands","Finger snapping","Clapping","Heart sounds","Heart murmur","Cheering","Applause","Chatter","Crowd","Hubbub","Children playing","Animal","Domestic animals","Dog","Bark","Yip","Howl","Bow-wow","Growling","Whimper (dog)","Cat","Purr","Meow","Hiss","Caterwaul","Livestock","Horse","Clip-clop","Neigh","Cattle","Moo","Cowbell","Pig","Oink","Goat","Bleat","Sheep","Fowl","Chicken","Cluck","Crowing","Turkey","Gobble","Duck","Quack","Goose","Honk","Wild animals","Roaring cats (lions","Roar","Bird","Bird vocalization","Chirp","Squawk","Pigeon","Coo","Crow","Caw","Owl","Hoot","Bird flight","Canidae","Rodents","Mouse","Patter","Insect","Cricket","Mosquito","Fly","Buzz","Bee","Frog","Croak","Snake","Rattle","Whale vocalization","Music","Musical instrument","Plucked string instrument","Guitar","Electric guitar","Bass guitar","Acoustic guitar","Steel guitar","Tapping (guitar technique)","Strum","Banjo","Sitar","Mandolin","Zither","Ukulele","Keyboard (musical)","Piano","Electric piano","Organ","Electronic organ","Hammond organ","Synthesizer","Sampler","Harpsichord","Percussion","Drum kit","Drum machine","Drum","Snare drum","Rimshot","Drum roll","Bass drum","Timpani","Tabla","Cymbal","Hi-hat","Wood block","Tambourine","Rattle (instrument)","Maraca","Gong","Tubular bells","Mallet percussion","Marimba","Glockenspiel","Vibraphone","Steelpan","Orchestra","Brass instrument","French horn","Trumpet","Trombone","Bowed string instrument","String section","Violin","Pizzicato","Cello","Double bass","Wind instrument","Flute","Saxophone","Clarinet","Harp","Bell","Church bell","Jingle bell","Bicycle bell","Tuning fork","Chime","Wind chime","Change ringing (campanology)","Harmonica","Accordion","Bagpipes","Didgeridoo","Shofar","Theremin","Singing bowl","Scratching (performance technique)","Pop music","Hip hop music","Beatboxing","Rock music","Heavy metal","Punk rock","Grunge","Progressive rock","Rock and roll","Psychedelic rock","Rhythm and blues","Soul music","Reggae","Country","Swing music","Bluegrass","Funk","Folk music","Middle Eastern music","Jazz","Disco","Classical music","Opera","Electronic music","House music","Techno","Dubstep","Drum and bass","Electronica","Electronic dance music","Ambient music","Trance music","Music of Latin America","Salsa music","Flamenco","Blues","Music for children","New-age music","Vocal music","A capella","Music of Africa","Afrobeat","Christian music","Gospel music","Music of Asia","Carnatic music","Music of Bollywood","Ska","Traditional music","Independent music","Song","Background music","Theme music","Jingle (music)","Soundtrack music","Lullaby","Video game music","Christmas music","Dance music","Wedding music","Happy music","Funny music","Sad music","Tender music","Exciting music","Angry music","Scary music","Wind","Rustling leaves","Wind noise (microphone)","Thunderstorm","Thunder","Water","Rain","Raindrop","Rain on surface","Stream","Waterfall","Ocean","Waves","Steam","Gurgling","Fire","Crackle","Vehicle","Boat","Sailboat","Rowboat","Motorboat","Ship","Motor vehicle (road)","Car","Vehicle horn","Toot","Car alarm","Power windows","Skidding","Tire squeal","Car passing by","Race car","Truck","Air brake","Air horn","Reversing beeps","Ice cream truck","Bus","Emergency vehicle","Police car (siren)","Ambulance (siren)","Fire engine","Motorcycle","Traffic noise","Rail transport","Train","Train whistle","Train horn","Railroad car","Train wheels squealing","Subway","Aircraft","Aircraft engine","Jet engine","Propeller","Helicopter","Fixed-wing aircraft","Bicycle","Skateboard","Engine","Light engine (high frequency)","Dental drill","Lawn mower","Chainsaw","Medium engine (mid frequency)","Heavy engine (low frequency)","Engine knocking","Engine starting","Idling","Accelerating","Door","Doorbell","Ding-dong","Sliding door","Slam","Knock","Tap","Squeak","Cupboard open or close","Drawer open or close","Dishes","Cutlery","Chopping (food)","Frying (food)","Microwave oven","Blender","Water tap","Sink (filling or washing)","Bathtub (filling or washing)","Hair dryer","Toilet flush","Toothbrush","Electric toothbrush","Vacuum cleaner","Zipper (clothing)","Keys jangling","Coin (dropping)","Scissors","Electric shaver","Shuffling cards","Typing","Typewriter","Computer keyboard","Writing","Alarm","Telephone","Telephone bell ringing","Ringtone","Telephone dialing","Dial tone","Busy signal","Alarm clock","Siren","Civil defense siren","Buzzer","Smoke detector","Fire alarm","Foghorn","Whistle","Steam whistle","Mechanisms","Ratchet","Clock","Tick","Tick-tock","Gears","Pulleys","Sewing machine","Mechanical fan","Air conditioning","Cash register","Printer","Camera","Single-lens reflex camera","Tools","Hammer","Jackhammer","Sawing","Filing (rasp)","Sanding","Power tool","Drill","Explosion","Gunshot","Machine gun","Fusillade","Artillery fire","Cap gun","Fireworks","Firecracker","Burst","Eruption","Boom","Wood","Chop","Splinter","Crack","Glass","Chink","Shatter","Liquid","Splash","Slosh","Squish","Drip","Pour","Trickle","Gush","Fill (with liquid)","Spray","Pump (liquid)","Stir","Boiling","Sonar","Arrow","Whoosh","Thump","Thunk","Electronic tuner","Effects unit","Chorus effect","Basketball bounce","Bang","Slap","Whack","Smash","Breaking","Bouncing","Whip","Flap","Scratch","Scrape","Rub","Roll","Crushing","Crumpling","Tearing","Beep","Ping","Ding","Clang","Squeal","Creak","Rustle","Whir","Clatter","Sizzle","Clicking","Clickety-clack","Rumble","Plop","Jingle","Hum","Zing","Boing","Crunch","Silence","Sine wave","Harmonic","Chirp tone","Sound effect","Pulse","Inside","Inside","Inside","Outside","Outside","Reverberation","Echo","Noise","Environmental noise","Static","Mains hum","Distortion","Sidetone","Cacophony","White noise","Pink noise","Throbbing","Vibration","Television","Radio","Field recording"
+];
+
+/* Distinct colors for analysis tags */
+const ANALYSIS_COLORS = [
+  '#4f83cc','#c0392b','#27ae60','#e67e22','#8e44ad',
+  '#16a085','#d4ac0d','#2980b9','#e74c3c','#1abc9c',
+  '#f39c12','#9b59b6','#3498db','#e84393','#00b894'
+];
+
+let cedSession = null;
+let cedLoading = false;
+let cedLoadCallbacks = [];
+let cedProgressEl = null; /* updated by runAnalysis to show download progress */
+
+/* Detect likely-China user via timezone for CDN selection */
+function isLikelyChina() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Shanghai'; } catch(e) { return false; }
+}
+
+/* Configure ONNX Runtime WASM paths — use npmmirror in China */
+(function() {
+  if (typeof ort !== 'undefined') {
+    const wasmBase = isLikelyChina()
+      ? 'https://registry.npmmirror.com/onnxruntime-web/1.21.0/files/dist/'
+      : 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
+    ort.env.wasm.wasmPaths = wasmBase;
+    ort.env.wasm.numThreads = 1; /* avoid crossOriginIsolated requirement */
+  }
+})();
+
+async function loadCedModel() {
+  if (cedSession) return cedSession;
+  if (cedLoading) {
+    return new Promise(resolve => cedLoadCallbacks.push(resolve));
+  }
+  cedLoading = true;
+  try {
+    /* Race all mirrors — first successful response wins.
+       This auto-picks the fastest mirror (handles China/global transparently). */
+    const modelData = await raceFetch(
+      CED_MIRRORS.map(m => m + CED_MODEL_PATH),
+      (loaded, total) => {
+        if (cedProgressEl) {
+          const mb = (loaded / 1048576).toFixed(1);
+          const tmb = total > loaded ? (total / 1048576).toFixed(1) : '?';
+          cedProgressEl.innerHTML = '<div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px"></div>Downloading model... ' + mb + ' / ' + tmb + ' MB';
+        }
+      }
+    );
+    if (cedProgressEl) {
+      cedProgressEl.innerHTML = '<div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px"></div>Initializing WASM runtime...';
+    }
+    /* Yield so the status text paints before the blocking create() call */
+    await new Promise(r => setTimeout(r, 0));
+    const modelBytes = new Uint8Array(modelData);
+    console.log('Model downloaded:', modelBytes.length, 'bytes');
+    cedSession = await ort.InferenceSession.create(modelBytes.buffer, {
+      executionProviders: ['wasm'],
+    });
+    cedLoading = false;
+    for (const cb of cedLoadCallbacks) cb(cedSession);
+    cedLoadCallbacks = [];
+    return cedSession;
+  } catch(e) {
+    cedLoading = false;
+    cedLoadCallbacks = [];
+    throw e;
+  }
+}
+
+/* Fetch from multiple URLs in parallel, return the first successful ArrayBuffer.
+   Calls onProgress(loaded, total) on the leading download. */
+function raceFetch(urls, onProgress) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let failures = 0;
+    const controllers = urls.map(() => new AbortController());
+
+    urls.forEach((url, i) => {
+      fetch(url, { signal: controllers[i].signal })
+        .then(resp => {
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const total = parseInt(resp.headers.get('content-length') || '0', 10);
+          const reader = resp.body.getReader();
+          const chunks = [];
+          let loaded = 0;
+
+          function pump() {
+            return reader.read().then(({ done, value }) => {
+              if (settled) return;
+              if (done) {
+                if (settled) return;
+                settled = true;
+                controllers.forEach((c, j) => { if (j !== i) c.abort(); });
+                const buf = new Uint8Array(loaded);
+                let off = 0;
+                for (const ch of chunks) { buf.set(ch, off); off += ch.length; }
+                resolve(buf.buffer);
+                return;
+              }
+              chunks.push(value);
+              loaded += value.length;
+              if (onProgress) onProgress(loaded, total || loaded);
+              return pump();
+            });
+          }
+          return pump();
+        })
+        .catch(e => {
+          if (settled) return;
+          failures++;
+          if (failures >= urls.length) {
+            reject(new Error('All mirrors failed: ' + e.message));
+          }
+        });
+    });
+  });
+}
+
+/* Resample audio buffer to 16kHz mono using OfflineAudioContext */
+async function resampleTo16k(buffer) {
+  const targetLen = Math.round(buffer.duration * CED_SR);
+  const offCtx = new OfflineAudioContext(1, targetLen, CED_SR);
+  const src = offCtx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(offCtx.destination);
+  src.start(0);
+  const rendered = await offCtx.startRendering();
+  return rendered.getChannelData(0);
+}
+
+/* Run analysis on a track */
+async function runAnalysis(track) {
+  if (track.analysisResults) return; /* already analyzed */
+  const btn = track.analyzeBtn;
+  const strip = track.analysisStrip;
+  if (!btn || !strip) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  strip.classList.remove('empty');
+  strip.innerHTML = '<div class="analysis-progress"><div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px"></div>Downloading CED-tiny model...</div>';
+  cedProgressEl = strip.querySelector('.analysis-progress');
+
+  let session;
+  try {
+    session = await loadCedModel();
+    cedProgressEl = null;
+    console.log('CED model loaded. Inputs:', session.inputNames, 'Outputs:', session.outputNames);
+  } catch(e) {
+    strip.innerHTML = '<div class="analysis-progress" style="color:#e74c3c">Failed to load model: ' + esc(String(e.message || e)) + '</div>';
+    btn.textContent = 'Analyze';
+    btn.disabled = false;
+    console.error('Model load error:', e);
+    return;
+  }
+
+  btn.textContent = 'Analyzing...';
+  strip.innerHTML = '<div class="analysis-progress"><div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px"></div>Resampling to 16kHz...</div>';
+
+  /* Resample */
+  let pcm16k;
+  try {
+    pcm16k = await resampleTo16k(track.buffer);
+    console.log('Resampled to 16kHz:', pcm16k.length, 'samples');
+  } catch(e) {
+    strip.innerHTML = '<div class="analysis-progress" style="color:#e74c3c">Resample failed: ' + esc(String(e.message || e)) + '</div>';
+    btn.textContent = 'Analyze';
+    btn.disabled = false;
+    console.error('Resample error:', e);
+    return;
+  }
+
+  /* Get input name */
+  const inputName = session.inputNames[0];
+
+  /* Chunk and run inference */
+  const nChunks = Math.max(1, Math.ceil(pcm16k.length / CED_CHUNK_SAMPLES));
+  const chunkResults = []; /* array of { startSec, endSec, labels: [{idx, prob}] } */
+
+  for (let i = 0; i < nChunks; i++) {
+    const startSample = i * CED_CHUNK_SAMPLES;
+    const endSample = Math.min(startSample + CED_CHUNK_SAMPLES, pcm16k.length);
+    const chunk = new Float32Array(CED_CHUNK_SAMPLES);
+    chunk.set(pcm16k.subarray(startSample, endSample));
+
+    strip.innerHTML = '<div class="analysis-progress"><div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px"></div>Analyzing chunk '+(i+1)+'/'+nChunks+'...</div>';
+
+    /* Yield to UI */
+    await new Promise(r => setTimeout(r, 0));
+
+    try {
+      const tensor = new ort.Tensor('float32', chunk, [1, chunk.length]);
+      if (i === 0) console.log('First chunk tensor shape:', [1, chunk.length], 'inputName:', inputName);
+      const result = await session.run({ [inputName]: tensor });
+      const output = result[session.outputNames[0]];
+      if (i === 0) console.log('First chunk output shape:', output.dims, 'sample values:', Array.from(output.data.slice(0, 5)));
+      const logits = output.data;
+
+      const labels = [];
+      for (let k = 0; k < logits.length; k++) {
+        const prob = logits[k];
+        if (prob >= CED_THRESHOLD) {
+          labels.push({ idx: k, prob });
+        }
+      }
+      labels.sort((a, b) => b.prob - a.prob);
+
+      const startSec = startSample / CED_SR;
+      const endSec = endSample / CED_SR;
+      chunkResults.push({ startSec, endSec, labels });
+    } catch(e) {
+      console.error('Inference error chunk', i, e);
+      chunkResults.push({ startSec: startSample/CED_SR, endSec: endSample/CED_SR, labels: [] });
+    }
+  }
+
+  /* Post-process: merge consecutive chunks with the same label into spans */
+  track.analysisResults = postProcessAnalysis(chunkResults, track.duration);
+  renderAnalysisStrip(track);
+  btn.textContent = 'Done';
+}
+
+/* Merge consecutive chunk detections of the same label into continuous spans.
+   Returns array of { label, labelIdx, startSec, endSec, maxProb } */
+function postProcessAnalysis(chunkResults, duration) {
+  /* Build per-label timeline: for each label, collect all chunks where it was detected */
+  const labelMap = new Map(); /* labelIdx → [{startSec, endSec, prob}] */
+
+  for (const cr of chunkResults) {
+    for (const l of cr.labels) {
+      if (!labelMap.has(l.idx)) labelMap.set(l.idx, []);
+      labelMap.get(l.idx).push({ startSec: cr.startSec, endSec: cr.endSec, prob: l.prob });
+    }
+  }
+
+  const spans = [];
+  const chunkDur = CED_CHUNK_SEC;
+  const mergeGap = chunkDur * 1.5; /* merge if gap ≤ 1.5 chunks */
+
+  for (const [labelIdx, chunks] of labelMap) {
+    chunks.sort((a, b) => a.startSec - b.startSec);
+
+    let spanStart = chunks[0].startSec;
+    let spanEnd = chunks[0].endSec;
+    let maxProb = chunks[0].prob;
+
+    for (let i = 1; i < chunks.length; i++) {
+      if (chunks[i].startSec - spanEnd <= mergeGap) {
+        /* extend */
+        spanEnd = chunks[i].endSec;
+        if (chunks[i].prob > maxProb) maxProb = chunks[i].prob;
+      } else {
+        /* emit span */
+        spans.push({ label: AUDIOSET_LABELS[labelIdx], labelIdx, startSec: spanStart, endSec: spanEnd, maxProb });
+        spanStart = chunks[i].startSec;
+        spanEnd = chunks[i].endSec;
+        maxProb = chunks[i].prob;
+      }
+    }
+    spans.push({ label: AUDIOSET_LABELS[labelIdx], labelIdx, startSec: spanStart, endSec: spanEnd, maxProb });
+  }
+
+  /* Sort by start time, then by probability */
+  spans.sort((a, b) => a.startSec - b.startSec || b.maxProb - a.maxProb);
+  return spans;
+}
+
+/* Render analysis spans into the strip element */
+function renderAnalysisStrip(track) {
+  const strip = track.analysisStrip;
+  const spans = track.analysisResults;
+  if (!strip || !spans || !spans.length) {
+    if (strip) { strip.innerHTML = '<div class="analysis-progress">No events detected above 50%</div>'; }
+    return;
+  }
+  strip.innerHTML = '';
+  strip.classList.remove('empty');
+
+  const dur = track.duration;
+
+  /* Assign rows via greedy interval scheduling to avoid overlaps */
+  const rows = []; /* each row is array of spans with their end times */
+  const spanRows = new Map(); /* span → row index */
+
+  for (const sp of spans) {
+    let placed = false;
+    for (let r = 0; r < rows.length; r++) {
+      const lastEnd = rows[r];
+      if (sp.startSec >= lastEnd - 0.01) {
+        rows[r] = sp.endSec;
+        spanRows.set(sp, r);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      spanRows.set(sp, rows.length);
+      rows.push(sp.endSec);
+    }
+  }
+
+  /* Create row divs */
+  const rowEls = [];
+  for (let r = 0; r < rows.length; r++) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'analysis-row';
+    strip.appendChild(rowEl);
+    rowEls.push(rowEl);
+  }
+
+  /* Color assignment: consistent per unique label */
+  const labelColorMap = new Map();
+  let colorIdx = 0;
+
+  for (const sp of spans) {
+    if (!labelColorMap.has(sp.labelIdx)) {
+      labelColorMap.set(sp.labelIdx, ANALYSIS_COLORS[colorIdx % ANALYSIS_COLORS.length]);
+      colorIdx++;
+    }
+    const color = labelColorMap.get(sp.labelIdx);
+    const row = spanRows.get(sp);
+    const leftPct = (sp.startSec / dur * 100);
+    const widthPct = ((sp.endSec - sp.startSec) / dur * 100);
+
+    const tag = document.createElement('div');
+    tag.className = 'analysis-tag';
+    tag.style.left = leftPct + '%';
+    tag.style.width = Math.max(widthPct, 0.5) + '%';
+    tag.style.background = color + '33';
+    tag.style.color = color;
+    tag.style.borderColor = color + '66';
+    tag.textContent = sp.label;
+    tag.title = sp.label + ' (' + (sp.maxProb * 100).toFixed(0) + '%) ' +
+      sp.startSec.toFixed(1) + 's–' + sp.endSec.toFixed(1) + 's';
+    rowEls[row].appendChild(tag);
+  }
+}
 
 /* ========================================================================
  *  EVENTS
