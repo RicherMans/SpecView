@@ -3,24 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ocen - Mel Spectrogram Player</title>
+<title>SpecView - Spectrogram Player</title>
 <style>
 :root {
-  --bg: #1e1e2e;
-  --bg-dark: #181825;
-  --bg-surface: #252538;
-  --bg-surface2: #2a2a40;
-  --text: #cdd6f4;
-  --text-dim: #6c7086;
-  --text-sub: #585b70;
-  --accent: #f38ba8;
-  --accent-glow: rgba(243,139,168,0.35);
-  --accent-hover: #eba0ac;
-  --green: #a6e3a1;
-  --blue: #89b4fa;
-  --yellow: #f9e2af;
-  --border: #313244;
-  --border-light: #45475a;
+  --bg: #f0f0f0;
+  --bg-toolbar: #e8e8e8;
+  --bg-card: #ffffff;
+  --bg-header: #f5f5f5;
+  --bg-spec: #000000;
+  --text: #2c2c2c;
+  --text-dim: #777;
+  --text-sub: #999;
+  --accent: #3b82f6;
+  --accent-light: #60a5fa;
+  --accent-glow: rgba(59,130,246,0.25);
+  --accent-hover: #2563eb;
+  --red: #ef4444;
+  --green: #22c55e;
+  --orange: #f59e0b;
+  --border: #d4d4d4;
+  --border-light: #e5e5e5;
+  --playhead: #ff3333;
+  --playhead-glow: rgba(255,51,51,0.5);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -40,8 +44,8 @@ body {
 .toolbar {
   display: flex;
   align-items: center;
-  padding: 6px 12px;
-  background: var(--bg-dark);
+  padding: 5px 12px;
+  background: var(--bg-toolbar);
   border-bottom: 1px solid var(--border);
   gap: 6px;
   flex-shrink: 0;
@@ -52,220 +56,211 @@ body {
   font-weight: 800;
   color: var(--accent);
   margin-right: 8px;
-  letter-spacing: 1px;
-  text-transform: lowercase;
+  letter-spacing: 0.5px;
 }
 .toolbar .sep {
-  width: 1px;
-  height: 20px;
-  background: var(--border);
-  margin: 0 4px;
+  width: 1px; height: 20px; background: var(--border); margin: 0 4px;
 }
 .btn {
-  background: var(--bg-surface);
+  background: var(--bg-card);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 5px 14px;
-  border-radius: 5px;
+  padding: 4px 12px;
+  border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
   font-family: inherit;
   transition: all .12s ease;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   white-space: nowrap;
 }
-.btn:hover { background: var(--bg-surface2); border-color: var(--border-light); }
+.btn:hover { background: #e9e9e9; border-color: #bbb; }
 .btn:active { transform: scale(0.97); }
 .btn:disabled { opacity: 0.35; pointer-events: none; }
-.btn.primary { background: var(--accent); color: #11111b; border-color: var(--accent); font-weight: 600; }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
 .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-.btn-icon { font-size: 13px; }
+.btn-icon { font-size: 12px; }
 .spacer { flex: 1; }
 
 .time-display {
   font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   font-size: 12px;
-  color: var(--accent);
-  background: var(--bg);
-  padding: 5px 12px;
-  border-radius: 5px;
+  color: var(--text);
+  background: var(--bg-card);
+  padding: 4px 10px;
+  border-radius: 4px;
   border: 1px solid var(--border);
-  min-width: 180px;
+  min-width: 175px;
   text-align: center;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 
-.vol-group { display: flex; align-items: center; gap: 5px; margin-left: 4px; }
+.vol-group { display: flex; align-items: center; gap: 5px; }
 .vol-group label { font-size: 11px; color: var(--text-dim); }
 .vol-slider {
   -webkit-appearance: none; appearance: none;
-  width: 70px; height: 4px; background: var(--border); border-radius: 2px; outline: none;
+  width: 65px; height: 3px; background: var(--border); border-radius: 2px; outline: none;
 }
 .vol-slider::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 12px; height: 12px;
+  -webkit-appearance: none; width: 11px; height: 11px;
   border-radius: 50%; background: var(--accent); cursor: pointer;
 }
 
 /* ===== DROP ZONE ===== */
 #drop-zone {
-  margin: 10px 12px;
+  margin: 8px 10px;
   border: 2px dashed var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   transition: all 0.2s ease; cursor: pointer; flex-shrink: 0;
+  background: var(--bg-card);
 }
-#drop-zone.empty { height: 200px; }
-#drop-zone.compact { height: 44px; flex-direction: row; margin: 6px 12px; gap: 8px; }
-#drop-zone .dz-icon { font-size: 40px; color: var(--text-dim); }
-#drop-zone.compact .dz-icon { font-size: 18px; }
-#drop-zone .dz-text { font-size: 14px; color: var(--text-dim); margin-top: 6px; }
-#drop-zone.compact .dz-text { margin-top: 0; font-size: 12px; }
-#drop-zone .dz-sub { font-size: 11px; color: var(--text-sub); margin-top: 3px; }
+#drop-zone.empty { height: 180px; }
+#drop-zone.compact { height: 38px; flex-direction: row; margin: 5px 10px; gap: 8px; }
+#drop-zone .dz-icon { font-size: 36px; color: var(--text-dim); }
+#drop-zone.compact .dz-icon { font-size: 16px; }
+#drop-zone .dz-text { font-size: 13px; color: var(--text-dim); margin-top: 5px; }
+#drop-zone.compact .dz-text { margin-top: 0; font-size: 11px; }
+#drop-zone .dz-sub { font-size: 10px; color: var(--text-sub); margin-top: 3px; }
 #drop-zone.compact .dz-sub { display: none; }
 #drop-zone.dragover { border-color: var(--accent); background: var(--accent-glow); }
 #drop-zone:hover { border-color: var(--accent); }
 
 /* ===== CONTAINER ===== */
-#tracks-container { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
+#tracks-container { flex: 1; overflow-y: auto; padding: 0 10px 10px; }
 
-/* ===== CARD (shared by standalone + diff) ===== */
+/* ===== CARD ===== */
 .card {
-  background: var(--bg-surface);
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   margin-bottom: 8px;
   overflow: hidden;
   transition: border-color .15s, box-shadow .15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 .card.active {
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-glow), 0 2px 12px var(--accent-glow);
+  box-shadow: 0 0 0 2px var(--accent-glow), 0 1px 4px rgba(0,0,0,0.08);
 }
 .card-header {
-  display: flex; align-items: center; padding: 6px 12px;
-  background: var(--bg-dark); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 5px 10px;
+  background: var(--bg-header); border-bottom: 1px solid var(--border-light);
   gap: 8px; cursor: pointer; transition: background .12s;
 }
-.card-header:hover { background: rgba(0,0,0,0.4); }
+.card-header:hover { background: #eaeaea; }
 .card-title {
-  font-size: 13px; font-weight: 600; flex: 1;
+  font-size: 12px; font-weight: 600; flex: 1; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .card-info {
-  font-size: 11px; color: var(--text-dim);
+  font-size: 10px; color: var(--text-dim);
   font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
 }
 .card-remove {
-  background: none; border: none; color: var(--text-dim);
-  font-size: 18px; cursor: pointer; padding: 0 4px; line-height: 1; transition: color .12s;
+  background: none; border: none; color: var(--text-sub);
+  font-size: 16px; cursor: pointer; padding: 0 3px; line-height: 1; transition: color .12s;
 }
-.card-remove:hover { color: var(--accent); }
+.card-remove:hover { color: var(--red); }
 
 .diff-badge {
-  font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 3px; letter-spacing: 0.3px;
-  background: rgba(137,180,250,0.15); color: var(--blue); border: 1px solid rgba(137,180,250,0.3);
+  font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px; letter-spacing: 0.3px;
+  background: rgba(59,130,246,0.1); color: var(--accent); border: 1px solid rgba(59,130,246,0.25);
 }
 
-/* ===== DIFF: side-by-side columns ===== */
-.diff-columns {
-  display: flex;
-  flex-direction: row;
-}
+/* ===== DIFF COLUMNS ===== */
+.diff-columns { display: flex; flex-direction: row; }
 .diff-lane {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  border-right: 1px solid var(--border-light);
 }
 .diff-lane:last-child { border-right: none; }
 
 .diff-lane-label {
-  display: flex; align-items: center; padding: 3px 10px;
-  background: rgba(0,0,0,0.25); gap: 6px; font-size: 11px;
-  border-bottom: 1px solid rgba(49,50,68,0.5);
+  display: flex; align-items: center; padding: 2px 8px;
+  background: #fafafa; gap: 5px; font-size: 10px;
+  border-bottom: 1px solid var(--border-light);
   cursor: pointer; transition: background .12s;
 }
-.diff-lane-label:hover { background: rgba(0,0,0,0.4); }
-.diff-lane-label.selected { background: rgba(243,139,168,0.1); }
-
+.diff-lane-label:hover { background: #f0f0f0; }
+.diff-lane-label.selected { background: rgba(59,130,246,0.08); }
 .diff-lane-tag {
-  font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px;
-  text-transform: uppercase; letter-spacing: 0.5px;
+  font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+  text-transform: uppercase; letter-spacing: 0.4px;
 }
 .diff-lane-name {
-  color: var(--text-dim); font-size: 11px;
+  color: var(--text-dim); font-size: 10px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .diff-lane-playing {
-  font-size: 9px; color: var(--accent); margin-left: auto;
-  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 8px; color: var(--accent); margin-left: auto;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; font-weight: 600;
 }
 
 /* ===== SPECTROGRAM BODY ===== */
-.track-body { display: flex; background: #0a0a14; flex: 1; min-height: 0; }
+.track-body { display: flex; background: #000; flex: 1; min-height: 0; }
 .freq-labels {
-  width: 48px; position: relative; flex-shrink: 0;
-  background: rgba(0,0,0,0.6); border-right: 1px solid var(--border);
+  width: 44px; position: relative; flex-shrink: 0;
+  background: #1a1a1a; border-right: 1px solid #333;
 }
 .freq-label {
-  position: absolute; right: 5px; font-size: 9px; color: var(--text-dim);
+  position: absolute; right: 4px; font-size: 8px; color: #aaa;
   font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   transform: translateY(-50%); white-space: nowrap; pointer-events: none;
 }
 .spec-wrapper {
-  position: relative; flex: 1; overflow-x: auto; overflow-y: hidden; cursor: crosshair;
+  position: relative; flex: 1; overflow: hidden; cursor: crosshair;
 }
-.spec-wrapper canvas { display: block; }
+.spec-wrapper canvas { display: block; width: 100%; }
 .playhead {
   position: absolute; top: 0; width: 2px; height: 100%;
-  background: var(--accent); pointer-events: none; z-index: 10;
-  box-shadow: 0 0 8px var(--accent-glow);
+  background: var(--playhead); pointer-events: none; z-index: 10;
+  box-shadow: 0 0 6px var(--playhead-glow);
 }
 
 /* ===== TIME RULER ===== */
 .time-ruler {
-  display: flex; padding: 3px 0 3px 48px;
-  background: var(--bg-dark); border-top: 1px solid var(--border); overflow: hidden;
+  display: flex; padding: 2px 0 2px 44px;
+  background: var(--bg-header); border-top: 1px solid var(--border-light); overflow: hidden;
 }
 .time-mark {
-  font-size: 10px; color: var(--text-dim);
+  font-size: 9px; color: var(--text-dim);
   font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
   flex-shrink: 0; text-align: left; padding-left: 2px;
 }
 
 /* ===== SCROLLBAR ===== */
-::-webkit-scrollbar { width: 7px; height: 7px; }
-::-webkit-scrollbar-track { background: var(--bg-dark); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #c0c0c0; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #aaa; }
 
 /* ===== LOADING ===== */
 .loading-overlay {
-  position: absolute; inset: 0; background: rgba(10,10,20,0.85);
+  position: absolute; inset: 0; background: rgba(0,0,0,0.8);
   display: flex; align-items: center; justify-content: center;
-  z-index: 20; font-size: 13px; color: var(--text-dim); gap: 8px;
+  z-index: 20; font-size: 12px; color: #aaa; gap: 8px;
 }
 .spinner {
-  width: 16px; height: 16px; border: 2px solid var(--border);
-  border-top-color: var(--accent); border-radius: 50%;
+  width: 14px; height: 14px; border: 2px solid #444;
+  border-top-color: var(--accent-light); border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ===== TAG COLORS ===== */
-.tag-a { background: rgba(243,139,168,0.2); color: var(--accent); }
-.tag-b { background: rgba(137,180,250,0.2); color: var(--blue); }
-.tag-c { background: rgba(166,227,161,0.2); color: var(--green); }
-.tag-d { background: rgba(249,226,175,0.2); color: var(--yellow); }
+.tag-a { background: rgba(59,130,246,0.15); color: var(--accent); }
+.tag-b { background: rgba(239,68,68,0.12); color: var(--red); }
+.tag-c { background: rgba(34,197,94,0.12); color: var(--green); }
+.tag-d { background: rgba(245,158,11,0.12); color: var(--orange); }
 </style>
 </head>
 <body>
 
 <div class="toolbar">
-  <span class="logo">ocen</span>
+  <span class="logo">SpecView</span>
   <div class="sep"></div>
   <button class="btn primary" id="btn-play" disabled>
     <span class="btn-icon" id="play-icon">&#9654;</span><span id="play-label">Play</span>
@@ -303,18 +298,29 @@ body {
 const FFT_SIZE    = 2048;
 const SPEC_H      = 220;
 const SPEC_H_DIFF = 180;
-const PX_PER_SEC  = 100;
-const MAX_WIDTH   = 32000;
 const HOP_DIV     = 4;
-const N_MELS      = 128;
-const F_MIN       = 20;
-const DB_RANGE    = 80;
+const F_MIN       = 30;     // Hz – log freq axis bottom
+const DB_RANGE    = 90;     // dB dynamic range
 
+/* Ocenaudio-style hot-metal colormap:
+   black → deep navy → blue → purple → magenta → red → orange → yellow → white */
 const COLORMAP = [
-  [13,8,135],[7,42,163],[24,68,170],[47,91,167],
-  [70,109,157],[92,125,145],[113,139,130],[135,152,112],
-  [158,165,90],[180,174,65],[203,180,37],[223,182,9],
-  [240,179,0],[251,178,0],[255,191,0],[252,253,191]
+  [  0,  0,  0],   // silence = black
+  [  2,  2, 20],
+  [  5,  5, 50],
+  [ 15, 10, 90],
+  [ 35, 15,130],
+  [ 70, 20,150],   // deep purple
+  [110, 15,140],
+  [150, 10,110],   // magenta-red
+  [185, 20, 60],
+  [210, 50, 20],   // red
+  [230, 90,  5],
+  [245,140,  0],   // orange
+  [255,185,  0],
+  [255,220, 40],   // yellow
+  [255,245,140],
+  [255,255,220],   // near-white
 ];
 
 const SUFFIX_PATTERNS = [
@@ -348,12 +354,8 @@ const gainNode = audioCtx.createGain();
 gainNode.connect(audioCtx.destination);
 gainNode.gain.value = 0.8;
 
-let tracks      = [];
-let groups      = [];   // { id, trackIds[], el }
-let nextId      = 1;
-let nextGrpId   = 1;
-let activeTrackId = null;
-let rafId       = null;
+let tracks = [], groups = [], nextId = 1, nextGrpId = 1;
+let activeTrackId = null, rafId = null;
 
 volSlider.addEventListener('input', () => { gainNode.gain.value = volSlider.value / 100; });
 
@@ -367,13 +369,11 @@ async function handleFiles(fileList) {
     if (!f.type.startsWith('audio/') && !ext.test(f.name)) continue;
     try {
       const buf = await f.arrayBuffer();
-      const decoded = await audioCtx.decodeAudioData(buf);
-      batch.push({ name: f.name, buffer: decoded });
+      batch.push({ name: f.name, buffer: await audioCtx.decodeAudioData(buf) });
     } catch(e) { console.error('Decode error:', f.name, e); }
   }
   if (!batch.length) return;
-  const grouped = groupByBaseName(batch);
-  for (const grp of grouped) {
+  for (const grp of groupByBaseName(batch)) {
     if (grp.items.length === 1) createStandalone(grp.items[0].name, grp.items[0].buffer);
     else createDiffGroup(grp.baseName, grp.items);
   }
@@ -384,14 +384,12 @@ async function handleFiles(fileList) {
  *  SUFFIX GROUPING
  * ======================================================================== */
 function stripExt(n) { return n.replace(/\.[^.]+$/, ''); }
-
 function findSuffix(noExt) {
   const low = noExt.toLowerCase();
   const sorted = SUFFIX_PATTERNS.slice().sort((a,b) => b.length - a.length);
-  for (const s of sorted) { if (low.endsWith(s)) return { base: noExt.slice(0, -s.length), suffix: noExt.slice(-s.length) }; }
+  for (const s of sorted) { if (low.endsWith(s)) return { base: noExt.slice(0,-s.length), suffix: noExt.slice(-s.length) }; }
   return { base: noExt, suffix: '' };
 }
-
 function groupByBaseName(items) {
   const m = new Map();
   for (const it of items) {
@@ -410,34 +408,7 @@ function groupByBaseName(items) {
 }
 
 /* ========================================================================
- *  MEL FILTERBANK
- * ======================================================================== */
-function hzToMel(hz) { return 2595 * Math.log10(1 + hz / 700); }
-function melToHz(m)  { return 700 * (Math.pow(10, m / 2595) - 1); }
-
-function buildMelFB(sr, fftSize, nMels, fMin, fMax) {
-  const nBins = fftSize / 2 + 1;
-  if (fMax == null) fMax = sr / 2;
-  const mMin = hzToMel(fMin), mMax = hzToMel(fMax);
-  const pts = new Float64Array(nMels + 2);
-  for (let i = 0; i < nMels + 2; i++) pts[i] = mMin + (mMax - mMin) * i / (nMels + 1);
-  const bf = new Float64Array(nMels + 2);
-  for (let i = 0; i < nMels + 2; i++) bf[i] = Math.floor((fftSize + 1) * melToHz(pts[i]) / sr);
-  const filters = [];
-  for (let m = 0; m < nMels; m++) {
-    const s = Math.max(0, Math.floor(bf[m])), c = Math.floor(bf[m+1]), e = Math.min(nBins-1, Math.floor(bf[m+2]));
-    const w = new Float64Array(Math.max(0, e - s + 1));
-    for (let k = s; k <= e; k++) {
-      if (k <= c && c > s) w[k-s] = (k-s)/(c-s);
-      else if (k > c && e > c) w[k-s] = (e-k)/(e-c);
-    }
-    filters.push({ start: s, end: e, weights: w });
-  }
-  return filters;
-}
-
-/* ========================================================================
- *  FFT
+ *  FFT  (Cooley-Tukey)
  * ======================================================================== */
 function fftFwd(re, im, N) {
   for (let i=1,j=0; i<N; i++) {
@@ -445,13 +416,13 @@ function fftFwd(re, im, N) {
     if(i<j){ let t=re[i];re[i]=re[j];re[j]=t; t=im[i];im[i]=im[j];im[j]=t; }
   }
   for (let len=2; len<=N; len<<=1) {
-    const h=len>>1, a=-2*Math.PI/len, wR=Math.cos(a), wI=Math.sin(a);
+    const h=len>>1, ang=-2*Math.PI/len, wR=Math.cos(ang), wI=Math.sin(ang);
     for (let i=0; i<N; i+=len) {
       let cR=1,cI=0;
       for (let j=0; j<h; j++) {
-        const aa=i+j, bb=i+j+h;
+        const a=i+j, bb=i+j+h;
         const tR=cR*re[bb]-cI*im[bb], tI=cR*im[bb]+cI*re[bb];
-        re[bb]=re[aa]-tR; im[bb]=im[aa]-tI; re[aa]+=tR; im[aa]+=tI;
+        re[bb]=re[a]-tR; im[bb]=im[a]-tI; re[a]+=tR; im[a]+=tI;
         const nr=cR*wR-cI*wI; cI=cR*wI+cI*wR; cR=nr;
       }
     }
@@ -459,46 +430,93 @@ function fftFwd(re, im, N) {
 }
 
 /* ========================================================================
- *  SPECTROGRAM RENDER
+ *  SPECTROGRAM RENDER  — Log-frequency STFT (ocenaudio style)
+ *
+ *  Each canvas column = one FFT frame.
+ *  Each pixel row maps to a frequency via log scale (F_MIN → Nyquist).
+ *  We interpolate between FFT bins for smooth rendering.
  * ======================================================================== */
 function renderSpec(track) {
-  const { buffer, canvas, melFilters } = track;
+  const { buffer, canvas } = track;
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
+  const sr = buffer.sampleRate;
+  const ny = sr / 2;
   const raw = buffer.numberOfChannels === 1 ? buffer.getChannelData(0) : mixDown(buffer);
   const nS = raw.length;
+
+  /* Hann window */
   const win = new Float64Array(FFT_SIZE);
-  for (let i=0; i<FFT_SIZE; i++) win[i] = 0.5*(1-Math.cos(2*Math.PI*i/(FFT_SIZE-1)));
-  const hop = FFT_SIZE / HOP_DIV;
-  const nF  = Math.max(1, Math.floor((nS - FFT_SIZE) / hop) + 1);
-  const nM  = melFilters.length, nB = FFT_SIZE/2+1;
-  const ms  = new Float64Array(nF * nM);
-  const re  = new Float64Array(FFT_SIZE), im = new Float64Array(FFT_SIZE), pw = new Float64Array(nB);
-  for (let f=0; f<nF; f++) {
-    const off = f*hop;
-    for (let i=0; i<FFT_SIZE; i++) { const idx=off+i; re[i]=idx<nS?raw[idx]*win[i]:0; im[i]=0; }
+  for (let i = 0; i < FFT_SIZE; i++) win[i] = 0.5 * (1 - Math.cos(2*Math.PI*i/(FFT_SIZE-1)));
+
+  const hop    = FFT_SIZE / HOP_DIV;
+  const nF     = Math.max(1, Math.floor((nS - FFT_SIZE) / hop) + 1);
+  const nBins  = FFT_SIZE / 2 + 1;
+  const binHz  = sr / FFT_SIZE;  // Hz per bin
+
+  /* Pre-compute log-freq → bin mapping for each pixel row */
+  const logMin = Math.log(Math.max(F_MIN, 1));
+  const logMax = Math.log(ny);
+  const rowBin = new Float64Array(H);     // fractional bin index for each row
+  for (let y = 0; y < H; y++) {
+    /* y=0 → top (high freq), y=H-1 → bottom (low freq) */
+    const frac = 1 - y / (H - 1);  // 0=bottom, 1=top
+    const freq = Math.exp(logMin + frac * (logMax - logMin));
+    rowBin[y] = freq / binHz;
+  }
+
+  /* Compute full STFT magnitude in dB, then render per-column */
+  const re = new Float64Array(FFT_SIZE);
+  const im = new Float64Array(FFT_SIZE);
+  const magDb = new Float64Array(nBins);
+
+  /* We'll track the global peak for normalization — two-pass approach:
+     Pass 1: compute all frames, find peak.
+     Pass 2: render pixels. To avoid storing all frames, we do single-pass
+     with a reasonable fixed reference: normalize per-frame against a running max,
+     then use a fixed dB floor. */
+
+  /* For quality: store all frame magnitudes, then render. Memory: nF * nBins float64 */
+  const allMag = new Float64Array(nF * nBins);
+
+  for (let f = 0; f < nF; f++) {
+    const off = f * hop;
+    for (let i = 0; i < FFT_SIZE; i++) { const idx=off+i; re[i]=idx<nS?raw[idx]*win[i]:0; im[i]=0; }
     fftFwd(re, im, FFT_SIZE);
-    for (let k=0; k<nB; k++) pw[k] = re[k]*re[k] + im[k]*im[k];
-    for (let m=0; m<nM; m++) {
-      const fl=melFilters[m]; let s=0;
-      for (let k=0; k<fl.weights.length; k++) { const b=fl.start+k; if(b<nB) s+=pw[b]*fl.weights[k]; }
-      ms[f*nM+m] = s>1e-20 ? 10*Math.log10(s) : -120;
+    const base = f * nBins;
+    for (let k = 0; k < nBins; k++) {
+      const mag = Math.sqrt(re[k]*re[k] + im[k]*im[k]);
+      allMag[base + k] = mag > 1e-12 ? 20 * Math.log10(mag) : -140;
     }
   }
-  let peak=-Infinity;
-  for (let i=0; i<ms.length; i++) if(ms[i]>peak) peak=ms[i];
-  const img = ctx.createImageData(W,H), px = img.data;
-  for (let x=0; x<W; x++) {
-    const fr = Math.min(Math.floor(x/W*nF), nF-1);
-    for (let y=0; y<H; y++) {
-      const mi = nM-1-Math.floor(y/H*nM);
-      const db = ms[fr*nM+mi];
-      const n  = Math.max(0,Math.min(1,(db-(peak-DB_RANGE))/DB_RANGE));
-      const [r,g,b] = cmap(n);
-      const o = (y*W+x)*4; px[o]=r; px[o+1]=g; px[o+2]=b; px[o+3]=255;
+
+  /* Find global peak */
+  let peak = -Infinity;
+  for (let i = 0; i < allMag.length; i++) if (allMag[i] > peak) peak = allMag[i];
+
+  /* Render pixels */
+  const img = ctx.createImageData(W, H);
+  const px  = img.data;
+
+  for (let x = 0; x < W; x++) {
+    const frame = Math.min(Math.floor(x / W * nF), nF - 1);
+    const base  = frame * nBins;
+
+    for (let y = 0; y < H; y++) {
+      /* Interpolate between bins for smooth log-frequency mapping */
+      const fb = rowBin[y];
+      const b0 = Math.max(0, Math.min(nBins - 1, Math.floor(fb)));
+      const b1 = Math.min(nBins - 1, b0 + 1);
+      const t  = fb - b0;
+      const db = allMag[base + b0] * (1 - t) + allMag[base + b1] * t;
+
+      const norm = Math.max(0, Math.min(1, (db - (peak - DB_RANGE)) / DB_RANGE));
+      const [r, g, b] = cmap(norm);
+      const o = (y * W + x) * 4;
+      px[o] = r; px[o+1] = g; px[o+2] = b; px[o+3] = 255;
     }
   }
-  ctx.putImageData(img,0,0);
+  ctx.putImageData(img, 0, 0);
 }
 
 function mixDown(buf) {
@@ -510,22 +528,25 @@ function mixDown(buf) {
 }
 
 function cmap(t) {
-  t=Math.max(0,Math.min(1,t));
-  const p=t*(COLORMAP.length-1), i=Math.min(Math.floor(p),COLORMAP.length-2), f=p-i;
-  const a=COLORMAP[i],b=COLORMAP[i+1];
-  return [Math.round(a[0]+(b[0]-a[0])*f), Math.round(a[1]+(b[1]-a[1])*f), Math.round(a[2]+(b[2]-a[2])*f)];
+  t = Math.max(0, Math.min(1, t));
+  const p = t * (COLORMAP.length - 1);
+  const i = Math.min(Math.floor(p), COLORMAP.length - 2);
+  const f = p - i;
+  const a = COLORMAP[i], b = COLORMAP[i+1];
+  return [
+    Math.round(a[0]+(b[0]-a[0])*f),
+    Math.round(a[1]+(b[1]-a[1])*f),
+    Math.round(a[2]+(b[2]-a[2])*f)
+  ];
 }
 
 /* ========================================================================
  *  TRACK HELPERS
  * ======================================================================== */
-function canvasW(dur) { return Math.min(Math.max(Math.ceil(dur*PX_PER_SEC),200),MAX_WIDTH); }
-
 function mkTrack(name, buffer) {
   const id=nextId++, dur=buffer.duration, sr=buffer.sampleRate, ny=sr/2;
   return {
     id, name, buffer, duration:dur, nyquist:ny, sr,
-    melFilters: buildMelFB(sr,FFT_SIZE,N_MELS,F_MIN,ny),
     canvas:null, wrapper:null, ph:null, laneLabel:null,
     playing:false, startTime:0, offset:0, source:null,
     groupId:null, el:null
@@ -533,13 +554,12 @@ function mkTrack(name, buffer) {
 }
 
 function buildSpecBody(track, h) {
-  const cw = canvasW(track.duration);
   const el = document.createElement('div');
   el.className = 'track-body';
   el.innerHTML =
     '<div class="freq-labels" style="height:'+h+'px"></div>'+
     '<div class="spec-wrapper" style="height:'+h+'px">'+
-      '<canvas height="'+h+'" width="'+cw+'" style="width:'+cw+'px"></canvas>'+
+      '<canvas height="'+h+'"></canvas>'+
       '<div class="playhead" style="left:0"></div>'+
       '<div class="loading-overlay"><div class="spinner"></div>Rendering...</div>'+
     '</div>';
@@ -549,21 +569,26 @@ function buildSpecBody(track, h) {
   addFreqLabels(el.querySelector('.freq-labels'), track.nyquist);
   const loading = el.querySelector('.loading-overlay');
 
-  /* click = select THIS track + seek all siblings' playheads */
   track.wrapper.addEventListener('click', e => {
     const rect = track.canvas.getBoundingClientRect();
-    const cx   = e.clientX - rect.left + track.wrapper.scrollLeft;
-    const ratio = Math.max(0, Math.min(1, cx / track.canvas.width));
-    const time  = ratio * track.duration;
-    selectAndSeek(track, time);
+    const cx   = e.clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, cx / rect.width));
+    selectAndSeek(track, ratio * track.duration);
   });
 
-  requestAnimationFrame(() => { renderSpec(track); if(loading.parentNode) loading.remove(); });
+  /* Defer render until element is in the DOM so we can measure width */
+  track._pendingRender = () => {
+    const w = track.wrapper.clientWidth;
+    if (w > 0) {
+      track.canvas.width = w;
+      renderSpec(track);
+    }
+    if (loading.parentNode) loading.remove();
+  };
   return el;
 }
 
 function buildRuler(dur) {
-  const cw = canvasW(dur);
   const el = document.createElement('div');
   el.className = 'time-ruler';
   const step = dur<=3?0.5 : dur<=10?1 : dur<=30?2 : dur<=120?5 : 10;
@@ -572,30 +597,22 @@ function buildRuler(dur) {
     const t=i*step; if(t>dur+0.01) break;
     const m = document.createElement('span');
     m.className='time-mark'; m.textContent=fmtShort(t);
-    m.style.width = (step/dur*cw)+'px';
+    m.style.width = (step/dur*100)+'%';
     el.appendChild(m);
   }
   return el;
 }
 
 /* ========================================================================
- *  SELECT + SEEK  — selects the clicked track for audio, seeks all
- *  siblings' playheads so they stay visually synced
+ *  SELECT + SEEK
  * ======================================================================== */
 function selectAndSeek(track, time) {
-  /* stop whatever was playing */
   stopAllSources();
-
   setActive(track.id);
   time = Math.max(0, Math.min(time, track.duration));
-
-  /* move playheads for all siblings */
   const sibs = getSiblings(track);
-  for (const s of sibs) {
-    s.offset = Math.max(0, Math.min(time, s.duration));
-  }
-  updatePlayheads();
-  updateTimeDisplay();
+  for (const s of sibs) s.offset = Math.max(0, Math.min(time, s.duration));
+  updatePlayheads(); updateTimeDisplay();
 }
 
 function getSiblings(t) {
@@ -611,10 +628,8 @@ function getSiblings(t) {
 function createStandalone(name, buffer) {
   const t = mkTrack(name, buffer);
   const chL = buffer.numberOfChannels===1?'Mono':buffer.numberOfChannels===2?'Stereo':buffer.numberOfChannels+'ch';
-
   const card = document.createElement('div');
   card.className = 'card'; card.dataset.trackId = t.id;
-
   const hdr = document.createElement('div');
   hdr.className = 'card-header';
   hdr.innerHTML =
@@ -626,11 +641,12 @@ function createStandalone(name, buffer) {
   card.appendChild(hdr);
   card.appendChild(buildSpecBody(t, SPEC_H));
   card.appendChild(buildRuler(t.duration));
-
   tracksBox.appendChild(card);
   t.el = card;
   tracks.push(t);
   if (!activeTrackId) activeTrackId = t.id;
+  /* render after DOM insertion so wrapper has measured width */
+  requestAnimationFrame(() => { if (t._pendingRender) { t._pendingRender(); t._pendingRender = null; } });
 }
 
 function removeTrack(id) {
@@ -638,7 +654,6 @@ function removeTrack(id) {
   if (i<0) return;
   const t = tracks[i];
   if (t.playing) stopSource(t);
-  /* if in a group, remove the whole group */
   if (t.groupId != null) { removeDiffGroup(t.groupId); return; }
   if (t.el) t.el.remove();
   tracks.splice(i,1);
@@ -647,17 +662,15 @@ function removeTrack(id) {
 }
 
 /* ========================================================================
- *  DIFF GROUP  — side-by-side vertical columns
+ *  DIFF GROUP
  * ======================================================================== */
 function createDiffGroup(baseName, items) {
   const gid = nextGrpId++;
   const grpTracks = [];
   const maxDur = Math.max(...items.map(i => i.buffer.duration));
-
   const card = document.createElement('div');
   card.className = 'card'; card.dataset.groupId = gid;
 
-  /* header */
   const hdr = document.createElement('div');
   hdr.className = 'card-header';
   const display = baseName || items[0].name;
@@ -670,18 +683,15 @@ function createDiffGroup(baseName, items) {
   hdr.querySelector('.card-remove').addEventListener('click', e => { e.stopPropagation(); removeDiffGroup(gid); });
   card.appendChild(hdr);
 
-  /* columns container */
   const cols = document.createElement('div');
   cols.className = 'diff-columns';
 
   items.forEach((item, idx) => {
     const t = mkTrack(item.name, item.buffer);
     t.groupId = gid;
-
     const lane = document.createElement('div');
     lane.className = 'diff-lane';
 
-    /* label row (clickable to select this track for playback) */
     const lbl = document.createElement('div');
     lbl.className = 'diff-lane-label';
     const tagText = item.suffix ? item.suffix.replace(/^_/,'') : ('Track '+(idx+1));
@@ -690,14 +700,10 @@ function createDiffGroup(baseName, items) {
       '<span class="diff-lane-tag '+tagCls+'">'+esc(tagText)+'</span>'+
       '<span class="diff-lane-name">'+esc(item.name)+'</span>'+
       '<span class="diff-lane-playing"></span>';
-    lbl.addEventListener('click', () => {
-      setActive(t.id);
-      updateLaneHighlights();
-    });
+    lbl.addEventListener('click', () => { setActive(t.id); updateLaneHighlights(); });
     lane.appendChild(lbl);
     t.laneLabel = lbl;
 
-    /* spec body */
     lane.appendChild(buildSpecBody(t, SPEC_H_DIFF));
     cols.appendChild(lane);
 
@@ -712,6 +718,12 @@ function createDiffGroup(baseName, items) {
   tracksBox.appendChild(card);
   groups.push({ id: gid, trackIds: grpTracks.map(t => t.id), el: card });
   updateLaneHighlights();
+  /* render all lanes after DOM insertion so wrappers have measured width */
+  requestAnimationFrame(() => {
+    for (const t of grpTracks) {
+      if (t._pendingRender) { t._pendingRender(); t._pendingRender = null; }
+    }
+  });
 }
 
 function removeDiffGroup(gid) {
@@ -722,8 +734,7 @@ function removeDiffGroup(gid) {
     const ti = tracks.findIndex(t => t.id===tid);
     if (ti>=0) { if(tracks[ti].playing) stopSource(tracks[ti]); tracks.splice(ti,1); }
   }
-  grp.el.remove();
-  groups.splice(gi,1);
+  grp.el.remove(); groups.splice(gi,1);
   if (activeTrackId && !tracks.find(t => t.id===activeTrackId))
     activeTrackId = tracks.length ? tracks[0].id : null;
   refreshUI();
@@ -735,22 +746,25 @@ function updateLaneHighlights() {
     const sel = t.id === activeTrackId;
     t.laneLabel.classList.toggle('selected', sel);
     const badge = t.laneLabel.querySelector('.diff-lane-playing');
-    if (badge) badge.textContent = sel ? '[ active ]' : '';
+    if (badge) badge.textContent = sel ? 'ACTIVE' : '';
   }
 }
 
 /* ========================================================================
- *  FREQUENCY LABELS
+ *  FREQUENCY LABELS  (log scale, matching spectrogram rendering)
  * ======================================================================== */
 function addFreqLabels(el, ny) {
-  const ticks=[50,100,200,500,1000,2000,4000,8000,16000];
-  const mMin=hzToMel(F_MIN), mMax=hzToMel(ny);
+  const ticks = [50,100,200,500,1000,2000,4000,8000,16000,20000];
+  const logMin = Math.log(Math.max(F_MIN, 1));
+  const logMax = Math.log(ny);
   for (const f of ticks) {
-    if(f<F_MIN||f>ny) continue;
-    const pct = (1-(hzToMel(f)-mMin)/(mMax-mMin))*100;
+    if (f < F_MIN || f > ny) continue;
+    /* same mapping as renderSpec: frac=0→bottom, frac=1→top, pct = (1-frac)*100 */
+    const frac = (Math.log(f) - logMin) / (logMax - logMin);
+    const pct  = (1 - frac) * 100;
     const l = document.createElement('span');
-    l.className='freq-label'; l.style.top=pct+'%';
-    l.textContent = f>=1000?(f/1000).toFixed(f%1000?1:0)+'k':f+'';
+    l.className = 'freq-label'; l.style.top = pct + '%';
+    l.textContent = f >= 1000 ? (f/1000).toFixed(f%1000?1:0)+'k' : f+'';
     el.appendChild(l);
   }
 }
@@ -771,14 +785,11 @@ function refreshUI() {
   dropZone.className = has ? 'compact' : 'empty';
   dropZone.querySelector('.dz-text').textContent =
     has ? '+ Add more audio files' : 'Drop audio files here or click to browse';
-  btnPlay.disabled = !has;
-  btnStop.disabled = !has;
-  highlightActive();
-  updateLaneHighlights();
-  updateTimeDisplay();
+  btnPlay.disabled = !has; btnStop.disabled = !has;
+  highlightActive(); updateLaneHighlights(); updateTimeDisplay();
 }
 
-function setActive(id) { activeTrackId = id; highlightActive(); updateLaneHighlights(); updateTimeDisplay(); }
+function setActive(id) { activeTrackId=id; highlightActive(); updateLaneHighlights(); updateTimeDisplay(); }
 
 function highlightActive() {
   document.querySelectorAll('.card.active').forEach(e => e.classList.remove('active'));
@@ -788,159 +799,104 @@ function highlightActive() {
 }
 
 /* ========================================================================
- *  PLAYBACK  — only plays the single active track
+ *  PLAYBACK
  * ======================================================================== */
 function playSource(t, from) {
   if (t.playing) stopSource(t);
-  t.offset = from; t.startTime = audioCtx.currentTime;
-  const src = audioCtx.createBufferSource();
-  src.buffer = t.buffer; src.connect(gainNode); src.start(0, from);
-  t.source = src; t.playing = true;
+  t.offset=from; t.startTime=audioCtx.currentTime;
+  const src=audioCtx.createBufferSource();
+  src.buffer=t.buffer; src.connect(gainNode); src.start(0,from);
+  t.source=src; t.playing=true;
   src.onended = () => {
-    if(t.playing) { t.offset=t.duration; t.playing=false; t.source=null; updateTimeDisplay(); if(!tracks.some(tr=>tr.playing)) updatePlayBtn(false); }
+    if(t.playing){ t.offset=t.duration; t.playing=false; t.source=null;
+      updateTimeDisplay(); if(!tracks.some(tr=>tr.playing)) updatePlayBtn(false); }
   };
 }
-
 function stopSource(t) {
   if(!t.playing) return;
-  t.offset = Math.min(t.offset + audioCtx.currentTime - t.startTime, t.duration);
-  try{t.source.stop();}catch(e){}
-  t.source=null; t.playing=false;
+  t.offset=Math.min(t.offset+audioCtx.currentTime-t.startTime,t.duration);
+  try{t.source.stop();}catch(e){} t.source=null; t.playing=false;
 }
-
 function playActive() {
-  const t = getActive();
-  if (!t) return;
-  audioCtx.resume();
-  stopAllSources();
-  if (t.offset >= t.duration - 0.01) t.offset = 0;
-  playSource(t, t.offset);
-  startAnim();
+  const t=getActive(); if(!t) return;
+  audioCtx.resume(); stopAllSources();
+  if(t.offset>=t.duration-0.01) t.offset=0;
+  playSource(t,t.offset); startAnim();
 }
-
-function stopAllSources() {
-  tracks.forEach(stopSource);
-  cancelAnimationFrame(rafId); rafId=null;
-}
-
-function stopAll() {
-  stopAllSources();
-  tracks.forEach(t => { t.offset=0; });
-  updatePlayheads(); updateTimeDisplay(); updatePlayBtn(false);
-}
+function stopAllSources() { tracks.forEach(stopSource); cancelAnimationFrame(rafId); rafId=null; }
+function stopAll() { stopAllSources(); tracks.forEach(t=>{t.offset=0;}); updatePlayheads(); updateTimeDisplay(); updatePlayBtn(false); }
 
 function togglePlay() {
-  if (!tracks.length) return;
-  const t = getActive();
-  if (!t) return;
-  if (t.playing) {
-    stopSource(t);
-    cancelAnimationFrame(rafId); rafId=null;
-    updatePlayBtn(false); updatePlayheads(); updateTimeDisplay();
-  } else {
-    playActive();
-  }
+  if(!tracks.length) return;
+  const t=getActive(); if(!t) return;
+  if(t.playing){ stopSource(t); cancelAnimationFrame(rafId); rafId=null; updatePlayBtn(false); updatePlayheads(); updateTimeDisplay(); }
+  else playActive();
 }
 
 function seek(time) {
-  const t = getActive();
-  if (!t) return;
-  time = Math.max(0, Math.min(time, t.duration));
-  const wasPlaying = t.playing;
-  /* seek all siblings' playheads */
-  const sibs = getSiblings(t);
-  for (const s of sibs) {
-    if (s.playing) stopSource(s);
-    s.offset = Math.max(0, Math.min(time, s.duration));
-  }
-  /* resume playback only for the active track */
-  if (wasPlaying) { playSource(t, t.offset); startAnim(); }
+  const t=getActive(); if(!t) return;
+  time=Math.max(0,Math.min(time,t.duration));
+  const was=t.playing;
+  const sibs=getSiblings(t);
+  for(const s of sibs){ if(s.playing) stopSource(s); s.offset=Math.max(0,Math.min(time,s.duration)); }
+  if(was){ playSource(t,t.offset); startAnim(); }
   updatePlayheads(); updateTimeDisplay();
 }
 
-function getActive() {
-  return activeTrackId ? tracks.find(t => t.id===activeTrackId) : tracks[0];
-}
+function getActive() { return activeTrackId ? tracks.find(t=>t.id===activeTrackId) : tracks[0]; }
 
 /* ========================================================================
  *  ANIMATION
  * ======================================================================== */
 function startAnim() {
-  cancelAnimationFrame(rafId);
-  updatePlayBtn(true);
-  (function tick() {
-    updatePlayheads(); updateTimeDisplay();
-    if (tracks.some(t => t.playing)) rafId = requestAnimationFrame(tick);
-    else { rafId=null; updatePlayBtn(false); }
+  cancelAnimationFrame(rafId); updatePlayBtn(true);
+  (function tick(){ updatePlayheads(); updateTimeDisplay();
+    if(tracks.some(t=>t.playing)) rafId=requestAnimationFrame(tick);
+    else{ rafId=null; updatePlayBtn(false); }
   })();
 }
-
-function getPos(t) {
-  return t.playing ? Math.min(t.offset + audioCtx.currentTime - t.startTime, t.duration) : t.offset;
-}
+function getPos(t) { return t.playing ? Math.min(t.offset+audioCtx.currentTime-t.startTime,t.duration) : t.offset; }
 
 function updatePlayheads() {
-  for (const t of tracks) {
-    if (!t.canvas || !t.ph) continue;
-    const pos = getPos(t);
-    const px  = (pos / t.duration) * t.canvas.width;
-    t.ph.style.left = px + 'px';
-    if (t.playing && t.wrapper) {
-      const vw = t.wrapper.clientWidth;
-      if (px > t.wrapper.scrollLeft + vw - 50 || px < t.wrapper.scrollLeft)
-        t.wrapper.scrollLeft = Math.max(0, px - 60);
-    }
-  }
-  /* sync scroll in diff groups */
-  for (const g of groups) {
-    const gts = g.trackIds.map(id => tracks.find(t => t.id===id)).filter(Boolean);
-    if (gts.length < 2) continue;
-    const ref = gts.find(t => t.playing) || gts.find(t => t.id===activeTrackId) || gts[0];
-    if (ref && ref.wrapper) {
-      const sl = ref.wrapper.scrollLeft;
-      for (const t of gts) { if(t!==ref && t.wrapper) t.wrapper.scrollLeft = sl; }
-    }
+  for(const t of tracks){
+    if(!t.canvas||!t.ph) continue;
+    const pos=getPos(t);
+    const pct = (pos / t.duration) * 100;
+    t.ph.style.left = pct + '%';
   }
 }
 
-function updateTimeDisplay() {
-  const t = getActive();
-  timeDisp.textContent = t ? fmt(getPos(t))+' / '+fmt(t.duration) : '0:00.000 / 0:00.000';
-}
-
-function updatePlayBtn(playing) {
-  playIcon.innerHTML = playing ? '&#10074;&#10074;' : '&#9654;';
-  playLabel.textContent = playing ? 'Pause' : 'Play';
-}
+function updateTimeDisplay() { const t=getActive(); timeDisp.textContent=t?fmt(getPos(t))+' / '+fmt(t.duration):'0:00.000 / 0:00.000'; }
+function updatePlayBtn(p){ playIcon.innerHTML=p?'&#10074;&#10074;':'&#9654;'; playLabel.textContent=p?'Pause':'Play'; }
 
 /* ========================================================================
  *  UTIL
  * ======================================================================== */
-function fmt(s) { if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60),sc=s%60; return m+':'+(sc<10?'0':'')+sc.toFixed(3); }
-function fmtShort(s) { if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60),sc=s%60; return m>0?m+':'+(sc<10?'0':'')+sc.toFixed(1):sc.toFixed(1)+'s'; }
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmt(s){ if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60),sc=s%60; return m+':'+(sc<10?'0':'')+sc.toFixed(3); }
+function fmtShort(s){ if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60),sc=s%60; return m>0?m+':'+(sc<10?'0':'')+sc.toFixed(1):sc.toFixed(1)+'s'; }
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ========================================================================
  *  EVENTS
  * ======================================================================== */
-dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
-fileInput.addEventListener('change', e => { handleFiles(e.target.files); e.target.value=''; });
-document.body.addEventListener('dragover', e => e.preventDefault());
-document.body.addEventListener('drop', e => { e.preventDefault(); handleFiles(e.dataTransfer.files); });
+dropZone.addEventListener('click',()=>fileInput.click());
+dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('dragover');});
+dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.classList.remove('dragover');handleFiles(e.dataTransfer.files);});
+fileInput.addEventListener('change',e=>{handleFiles(e.target.files);e.target.value='';});
+document.body.addEventListener('dragover',e=>e.preventDefault());
+document.body.addEventListener('drop',e=>{e.preventDefault();handleFiles(e.dataTransfer.files);});
 
-btnPlay.addEventListener('click', togglePlay);
-btnStop.addEventListener('click', stopAll);
-btnClear.addEventListener('click', clearAll);
+btnPlay.addEventListener('click',togglePlay);
+btnStop.addEventListener('click',stopAll);
+btnClear.addEventListener('click',clearAll);
 
-document.addEventListener('keydown', e => {
+document.addEventListener('keydown',e=>{
   if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
-  if(e.code==='Space')     { e.preventDefault(); togglePlay(); }
-  if(e.code==='Escape')    { e.preventDefault(); stopAll(); }
-  if(e.code==='ArrowLeft') { e.preventDefault(); const t=getActive(); if(t) seek(getPos(t)-2); }
-  if(e.code==='ArrowRight'){ e.preventDefault(); const t=getActive(); if(t) seek(getPos(t)+2); }
+  if(e.code==='Space'){e.preventDefault();togglePlay();}
+  if(e.code==='Escape'){e.preventDefault();stopAll();}
+  if(e.code==='ArrowLeft'){e.preventDefault();const t=getActive();if(t)seek(getPos(t)-2);}
+  if(e.code==='ArrowRight'){e.preventDefault();const t=getActive();if(t)seek(getPos(t)+2);}
 });
 
 refreshUI();
