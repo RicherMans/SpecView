@@ -1236,7 +1236,38 @@ const CED_MIRRORS = [
 const CED_SR = 16000;
 const CED_CHUNK_SEC = 0.96;
 const CED_CHUNK_SAMPLES = Math.round(CED_SR * CED_CHUNK_SEC);
-const CED_THRESHOLD = 0.5;
+const CED_TOP_N = 5;
+const CED_THRESH_COMMON = 0.50;
+const CED_THRESH_RARE   = 0.25;
+
+/* Generic/parent labels that fire too easily — require 50% */
+const CED_COMMON = new Set([
+  0,1,2,3,4,5,6,        /* Speech, Male/Female/Child speech, Conversation, Narration, Babbling */
+  27,                     /* Singing */
+  32,33,                  /* Male/Female singing */
+  72,73,                  /* Animal, Domestic animals */
+  108,                    /* Wild animals */
+  137,138,                /* Music, Musical instrument */
+  139,                    /* Plucked string instrument */
+  161,                    /* Percussion */
+  185,189,195,            /* Brass/Bowed string/Wind instrument */
+  254,266,267,268,        /* Vocal music, Song, Background music, Theme music */
+  270,                    /* Soundtrack music */
+  283,288,                /* Wind, Water */
+  300,306,                /* Vehicle, Motor vehicle */
+  388,                    /* Alarm */
+  404,418,                /* Mechanisms, Tools */
+  504,                    /* Sound effect */
+  513,514,                /* Noise, Environmental noise */
+]);
+
+/* Blacklisted — never useful */
+const CED_BLACKLIST = new Set([
+  500,                    /* Silence */
+  506,507,508,            /* Inside (×3) */
+  509,510,                /* Outside (×2) */
+  526,                    /* Field recording */
+]);
 
 /* AudioSet 527 labels (id → label) */
 const AUDIOSET_LABELS = [
@@ -1438,16 +1469,23 @@ async function runAnalysis(track) {
       const result = await session.run({ [inputName]: tensor });
       const output = result[session.outputNames[0]];
       if (i === 0) console.log('First chunk output shape:', output.dims, 'sample values:', Array.from(output.data.slice(0, 5)));
-      const logits = output.data;
+      const probs = output.data;
 
-      const labels = [];
-      for (let k = 0; k < logits.length; k++) {
-        const prob = logits[k];
-        if (prob >= CED_THRESHOLD) {
-          labels.push({ idx: k, prob });
-        }
+      /* Build scored list, excluding blacklisted labels */
+      const scored = [];
+      for (let k = 0; k < probs.length; k++) {
+        if (CED_BLACKLIST.has(k)) continue;
+        scored.push({ idx: k, prob: probs[k] });
       }
-      labels.sort((a, b) => b.prob - a.prob);
+      /* Take top N by confidence */
+      scored.sort((a, b) => b.prob - a.prob);
+      const topN = scored.slice(0, CED_TOP_N);
+
+      /* Apply per-category threshold */
+      const labels = topN.filter(l => {
+        const thresh = CED_COMMON.has(l.idx) ? CED_THRESH_COMMON : CED_THRESH_RARE;
+        return l.prob >= thresh;
+      });
 
       const startSec = startSample / CED_SR;
       const endSec = endSample / CED_SR;
