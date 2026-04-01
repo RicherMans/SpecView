@@ -1,0 +1,96 @@
+{
+  "name": "specview",
+  "displayName": "SpecView - Spectrogram Viewer",
+  "description": "Audio spectrogram viewer with playback, auto-grouping for A/B comparison, and ML-powered audio classification",
+  "version": "0.1.0",
+  "publisher": "specview",
+  "license": "Apache-2.0",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RicherMans/SpecView"
+  },
+  "homepage": "https://github.com/RicherMans/SpecView",
+  "bugs": {
+    "url": "https://github.com/RicherMans/SpecView/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "audio",
+    "spectrogram",
+    "wav",
+    "mp3",
+    "flac",
+    "visualization",
+    "comparison",
+    "diff",
+    "playback",
+    "classification"
+  ],
+  "activationEvents": [
+    "onCustomEditor:specview.editor",
+    "onCommand:specview.openFile",
+    "onCommand:specview.openMultiple"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "specview.editor",
+        "displayName": "SpecView Spectrogram",
+        "selector": [
+          {
+            "filenamePattern": "*.{wav,mp3,ogg,flac,m4a,aac,webm,wma,aiff,opus}"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "specview.openFile",
+        "title": "SpecView: Open Audio File"
+      },
+      {
+        "command": "specview.openMultiple",
+        "title": "Open with SpecView"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "specview.openMultiple",
+          "when": "resourceExtname =~ /\\.(wav|mp3|ogg|flac|m4a|aac|webm|wma|aiff|opus)$/i",
+          "group": "navigation"
+        }
+      ]
+    },
+    "editorAssociations": [
+      {
+        "viewType": "specview.editor",
+        "filenamePattern": "*.{wav,mp3,ogg,flac,m4a,aac,webm,wma,aiff,opus}"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "node esbuild.mjs",
+    "compile": "tsc -p tsconfig.json",
+    "watch": "tsc -watch -p tsconfig.json",
+    "bundle": "node esbuild.mjs",
+    "bundle:watch": "node esbuild.mjs --watch",
+    "package": "vsce package",
+    "lint": "echo 'no lint configured'"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.3.0"
+  }
+}
