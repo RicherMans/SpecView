@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.1
+
+### New Features
+
+- **Delete key** (`Delete`) to remove the active track or individual lane from a diff group
+- **Lane remove button** (×) on each lane in diff groups — click to remove that lane only
+  - 2-lane group: remaining lane converts to standalone track
+  - 3+ lane group: group rebuilds without the removed lane
+- **Card navigation** — Up/Down arrow keys to switch between cards (tracks or groups) with smooth scrolling
+- **Card position preservation** — cards stay at their original position when deleting lanes, merging tracks, or adding to groups
+
+### Bug Fixes
+
+- Fixed removed files could not be re-added after deletion (extension host `loadedFiles` now syncs on track removal)
+- Fixed waveform not rendering for newly loaded files when waveform toggle is already on
+- Fixed Play/Pause button state not updating when clicking a different track's spectrogram during playback
+- Fixed auto-pause now uses `visibilitychange` event for reliable detection when switching VS Code panels
+- Fixed audio glitch during rapid seek (source identity check in `onended` callback)
+- Fixed click-to-seek now preserves playback state (continues playing from new position)
+
 ## 0.1.0 — Initial Release
 
 ### Features

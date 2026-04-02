@@ -114,6 +114,14 @@ Files with the same name from different directories are automatically grouped, w
 | **Command Palette** | `Ctrl+Shift+P` → "SpecView: Open Audio File" → file picker |
 | **Click drop zone** | Click "Click to add audio files" area → file picker (defaults to last opened directory) |
 
+### Track Management
+
+- **Delete track**: Press `Delete` key or click the × button on the card header to remove a standalone track
+- **Remove lane from group**: Click the × button on any lane label within a diff group to remove just that lane
+  - If only 2 lanes remain, removing one converts the other to a standalone track
+  - Cards maintain their position in the list when lanes are removed or groups are restructured
+- **Re-add removed files**: Files that have been removed can be re-added normally
+
 ### Keyboard Shortcuts
 
 | Key | Action |
