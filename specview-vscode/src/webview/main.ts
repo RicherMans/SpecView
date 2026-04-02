@@ -3,6 +3,7 @@ import {
   initUI, handleFiles, togglePlay, stopAll, clearAll, seek,
   getActive, switchLane, getTracks,
   zoomIn, zoomOut, zoomFit, setWaveformVisible, pauseAll,
+  moveToNextCard, moveToPrevCard,
 } from './ui';
 import { getPos } from './audio';
 import { runAnalysisAll } from './analysis';
@@ -130,6 +131,10 @@ document.addEventListener('keydown', e => {
   if (e.shiftKey && e.code === 'ArrowUp') { e.preventDefault(); zoomIn(); return; }
   if (e.shiftKey && e.code === 'ArrowDown') { e.preventDefault(); zoomOut(); return; }
   if (e.shiftKey && e.code === 'ArrowLeft') { e.preventDefault(); zoomFit(); return; }
+
+  // Card navigation: Up / Down (no modifier)
+  if (!e.shiftKey && e.code === 'ArrowUp') { e.preventDefault(); moveToPrevCard(); return; }
+  if (!e.shiftKey && e.code === 'ArrowDown') { e.preventDefault(); moveToNextCard(); return; }
 
   if (e.code === 'Space' && e.shiftKey) { e.preventDefault(); switchLane(); }
   else if (e.code === 'Space') { e.preventDefault(); togglePlay(); }

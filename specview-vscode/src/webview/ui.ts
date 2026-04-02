@@ -419,6 +419,40 @@ export function zoomFit(): void {
   updatePlayheads();
 }
 
+// ========== CARD NAVIGATION ==========
+
+export function moveToNextCard(): void {
+  const cards = Array.from(tracksBox.children) as HTMLElement[];
+  if (cards.length === 0) return;
+  const active = getActive();
+  if (!active || !active.el) { if (tracks.length) setActive(tracks[0].id); return; }
+  const idx = cards.indexOf(active.el);
+  if (idx < 0) return;
+  const nextIdx = (idx + 1) % cards.length;
+  const nextCard = cards[nextIdx];
+  const firstTrack = tracks.find(t => t.el === nextCard);
+  if (firstTrack) {
+    setActive(firstTrack.id);
+    nextCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+export function moveToPrevCard(): void {
+  const cards = Array.from(tracksBox.children) as HTMLElement[];
+  if (cards.length === 0) return;
+  const active = getActive();
+  if (!active || !active.el) { if (tracks.length) setActive(tracks[0].id); return; }
+  const idx = cards.indexOf(active.el);
+  if (idx < 0) return;
+  const prevIdx = (idx - 1 + cards.length) % cards.length;
+  const prevCard = cards[prevIdx];
+  const firstTrack = tracks.find(t => t.el === prevCard);
+  if (firstTrack) {
+    setActive(firstTrack.id);
+    prevCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
 // ========== WAVEFORM TOGGLE ==========
 
 export function setWaveformVisible(visible: boolean): void {

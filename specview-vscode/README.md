@@ -122,6 +122,7 @@ Files with the same name from different directories are automatically grouped, w
 | `Shift + Space` | Switch lane in diff group (A/B comparison) |
 | `Escape` | Stop playback and reset position |
 | `←` / `→` | Seek backward / forward 2 seconds |
+| `↑` / `↓` | Switch to previous / next card (track or group) |
 | `Shift + ↑` | Zoom in (time axis) |
 | `Shift + ↓` | Zoom out (time axis) |
 | `Shift + ←` | Reset zoom (fit all) |
