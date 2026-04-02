@@ -229,13 +229,17 @@ body {
 
 /* ===== TIME RULER ===== */
 .time-ruler {
-  display: flex; padding: 2px 0 2px 44px;
+  position: relative; height: 16px; padding: 2px 0 2px 44px;
   background: var(--bg-header); border-top: 1px solid var(--border-light); overflow: hidden;
 }
 .time-mark {
-  font-size: 9px; color: var(--text-dim);
+  position: absolute; font-size: 9px; color: var(--text-dim);
   font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-  flex-shrink: 0; text-align: left; padding-left: 2px;
+  white-space: nowrap; transform: translateX(-50%);
+}
+.zoom-selection {
+  position: absolute; top: 0; background: rgba(59,130,246,0.25);
+  border: 1px solid rgba(59,130,246,0.6); pointer-events: none; z-index: 15;
 }
 
 /* ===== SCROLLBAR ===== */
@@ -342,6 +346,10 @@ body {
     <input type="range" class="vol-slider" id="vol-slider" min="0" max="100" value="80">
   </div>
   <div class="sep"></div>
+  <button class="btn" id="btn-zoom-in" disabled title="Zoom In (Shift+Up)">+</button>
+  <button class="btn" id="btn-zoom-out" disabled title="Zoom Out (Shift+Down)">&#8211;</button>
+  <button class="btn" id="btn-zoom-fit" disabled title="Fit All (Shift+Left)">Fit</button>
+  <div class="sep"></div>
   <button class="btn" id="btn-analyze-all" disabled>Analyze All</button>
   <div class="sep"></div>
   <button class="btn" id="btn-clear">Clear All</button>
@@ -425,6 +433,9 @@ const btnPlay   = document.getElementById('btn-play');
 const btnStop   = document.getElementById('btn-stop');
 const btnClear  = document.getElementById('btn-clear');
 const btnAnalyzeAll = document.getElementById('btn-analyze-all');
+const btnZoomIn = document.getElementById('btn-zoom-in');
+const btnZoomOut = document.getElementById('btn-zoom-out');
+const btnZoomFit = document.getElementById('btn-zoom-fit');
 const timeDisp  = document.getElementById('time-display');
 const playIcon  = document.getElementById('play-icon');
 const playLabel = document.getElementById('play-label');
@@ -700,116 +711,136 @@ function fftFwd(re, im, N) {
 }
 
 /* ========================================================================
- *  SPECTROGRAM RENDER  — Linear-frequency STFT (ocenaudio style)
- *
- *  Each canvas column = one FFT frame.
- *  Each pixel row maps linearly to a frequency bin (0 → Nyquist).
- *  Performance: pre-baked colormap LUT, only compute as many FFT
- *  frames as pixel columns, Float32 throughout.
+ *  SPECTROGRAM — computeSpec (one-time STFT) + drawSpec (fast redraw)
  * ======================================================================== */
-function renderSpec(track) {
-  const { buffer, canvas, nyquist } = track;
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  if (W === 0 || H === 0) return;
+const MIN_VIEW_SPAN = 0.05;
+const ZOOM_FACTOR = 1.25;
+
+function computeSpec(track, H) {
+  const { buffer, nyquist } = track;
   const sr = buffer.sampleRate;
   const raw = buffer.numberOfChannels === 1 ? buffer.getChannelData(0) : mixDown(buffer);
   const nS = raw.length;
-
-  /* Hann window (Float32 is fine) */
   const win = new Float32Array(FFT_SIZE);
   for (let i = 0; i < FFT_SIZE; i++) win[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (FFT_SIZE - 1)));
-
   const nBins = (FFT_SIZE >> 1) + 1;
   const binHz = sr / FFT_SIZE;
-
-  /* Cap display to native Nyquist — ignore bins above it */
   const maxBin = Math.min(nBins - 1, Math.ceil(nyquist / binHz));
-
-  /* Adaptive hop: use smaller hop for short files to fill the canvas width,
-     but never smaller than 1 sample and never larger than FFT_SIZE/HOP_DIV */
-  const defaultHop = FFT_SIZE / HOP_DIV;
-  const defaultFrames = Math.max(1, Math.floor((nS - FFT_SIZE) / defaultHop) + 1);
-  let hop, maxFrames;
-  if (defaultFrames < W && nS > FFT_SIZE) {
-    hop = Math.max(1, Math.floor((nS - FFT_SIZE) / (W - 1)));
-    maxFrames = Math.max(1, Math.floor((nS - FFT_SIZE) / hop) + 1);
-  } else {
-    hop = defaultHop;
-    maxFrames = defaultFrames;
-  }
-  const nF = Math.min(W, maxFrames);
-
+  const hop = FFT_SIZE / HOP_DIV;
+  const nF = Math.max(1, Math.floor((nS - FFT_SIZE) / hop) + 1);
   const re = new Float64Array(FFT_SIZE);
   const im = new Float64Array(FFT_SIZE);
   const colDb = new Float32Array(nF * H);
-
-  /* Pre-compute row → bin mapping (linear, 0 to maxBin) */
   const rowBin = new Float32Array(H);
-  for (let y = 0; y < H; y++) {
-    rowBin[y] = (1 - y / (H - 1)) * maxBin;
-  }
-
+  for (let y = 0; y < H; y++) rowBin[y] = (1 - y / (H - 1)) * maxBin;
   for (let c = 0; c < nF; c++) {
     const off = c * hop;
-
-    /* Window + load */
-    for (let i = 0; i < FFT_SIZE; i++) {
-      const idx = off + i;
-      re[i] = idx < nS ? raw[idx] * win[i] : 0;
-      im[i] = 0;
-    }
+    for (let i = 0; i < FFT_SIZE; i++) { const idx = off + i; re[i] = idx < nS ? raw[idx] * win[i] : 0; im[i] = 0; }
     fftFwd(re, im, FFT_SIZE);
-
-    /* Magnitude in dB for each pixel row */
     const base = c * H;
     for (let y = 0; y < H; y++) {
-      const fb = rowBin[y];
-      const b0 = fb | 0;  /* fast floor */
-      const b1 = b0 < maxBin ? b0 + 1 : b0;
-      const t  = fb - b0;
-      const m0 = Math.sqrt(re[b0] * re[b0] + im[b0] * im[b0]);
-      const m1 = Math.sqrt(re[b1] * re[b1] + im[b1] * im[b1]);
-      const mag = m0 * (1 - t) + m1 * t;
+      const fb = rowBin[y]; const b0 = fb | 0; const b1 = b0 < maxBin ? b0 + 1 : b0; const t = fb - b0;
+      const m0 = Math.sqrt(re[b0]*re[b0]+im[b0]*im[b0]);
+      const m1 = Math.sqrt(re[b1]*re[b1]+im[b1]*im[b1]);
+      const mag = m0*(1-t)+m1*t;
       colDb[base + y] = mag > 1e-12 ? 20 * Math.log10(mag) : -140;
     }
   }
+  let globalPeak = -Infinity;
+  for (let i = 0; i < colDb.length; i++) if (colDb[i] > globalPeak) globalPeak = colDb[i];
+  track.specData = colDb; track.specFrames = nF; track.specHop = hop;
+  track.specH = H; track.specMaxBin = maxBin; track.specGlobalPeak = globalPeak;
+}
 
-  /* Find global peak */
-  let peak = -Infinity;
-  for (let i = 0; i < colDb.length; i++) if (colDb[i] > peak) peak = colDb[i];
+function drawSpec(track) {
+  const { canvas, specData, specFrames, specHop, specH } = track;
+  if (!canvas || !specData || !specFrames) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  if (W === 0 || H === 0) return;
+  const sr = track.buffer.sampleRate;
+  const nS = track.buffer.length;
+  const nF = specFrames, hop = specHop;
+  const startSample = Math.max(0, Math.floor(track.viewStart * sr));
+  const endSample = Math.min(nS, Math.ceil(track.viewEnd * sr));
+  const startFrame = Math.max(0, Math.floor((startSample - FFT_SIZE / 2) / hop));
+  const endFrame = Math.min(nF - 1, Math.ceil((endSample - FFT_SIZE / 2) / hop));
+  const visibleFrames = Math.max(1, endFrame - startFrame + 1);
+  let peak = track.specGlobalPeak;
+  if (peak < -120) peak = -50;
   const floor = peak - DB_RANGE;
   const invRange = 1 / DB_RANGE;
-
-  /* Render pixels using pre-baked LUT */
   const img = ctx.createImageData(W, H);
-  const px  = img.data;
-  const px32 = new Uint32Array(px.buffer);  /* write 4 bytes at once */
-
-  /* Detect endianness for Uint32 writes */
+  const px32 = new Uint32Array(img.data.buffer);
   const isLE = new Uint8Array(new Uint32Array([0x0A0B0C0D]).buffer)[0] === 0x0D;
-
   for (let x = 0; x < W; x++) {
-    /* Map pixel column to closest computed column */
-    const col = Math.min(Math.round(x * nF / W), nF - 1);
+    const col = Math.min(startFrame + Math.round(x * visibleFrames / W), endFrame);
     const base = col * H;
-
     for (let y = 0; y < H; y++) {
-      const db = colDb[base + y];
-      /* Normalize to 0-255 LUT index */
+      const db = specData[base + y];
       let norm = (db - floor) * invRange;
       if (norm < 0) norm = 0; else if (norm > 1) norm = 1;
-      const li = (norm * 255 + 0.5) | 0;
-      const ci = li * 3;
-      const o = y * W + x;
-      if (isLE) {
-        px32[o] = 0xFF000000 | (CMAP_LUT[ci + 2] << 16) | (CMAP_LUT[ci + 1] << 8) | CMAP_LUT[ci];
-      } else {
-        px32[o] = (CMAP_LUT[ci] << 24) | (CMAP_LUT[ci + 1] << 16) | (CMAP_LUT[ci + 2] << 8) | 0xFF;
-      }
+      const li = (norm * 255 + 0.5) | 0; const ci = li * 3; const o = y * W + x;
+      if (isLE) px32[o] = 0xFF000000 | (CMAP_LUT[ci+2]<<16) | (CMAP_LUT[ci+1]<<8) | CMAP_LUT[ci];
+      else px32[o] = (CMAP_LUT[ci]<<24) | (CMAP_LUT[ci+1]<<16) | (CMAP_LUT[ci+2]<<8) | 0xFF;
     }
   }
   ctx.putImageData(img, 0, 0);
+}
+
+function renderSpec(track) {
+  const H = track.canvas ? track.canvas.height : SPEC_H;
+  if (!track.specData) computeSpec(track, H);
+  drawSpec(track);
+}
+
+function redrawTrack(track) {
+  if (!track.canvas || !track.specData) return;
+  drawSpec(track);
+}
+
+/* ========== ZOOM FUNCTIONS ========== */
+function setTrackView(track, start, end) {
+  const span = Math.max(MIN_VIEW_SPAN, end - start);
+  track.viewStart = Math.max(0, start);
+  track.viewEnd = Math.min(track.duration, track.viewStart + span);
+  if (track.viewEnd - track.viewStart < span && track.viewStart > 0)
+    track.viewStart = Math.max(0, track.viewEnd - span);
+}
+function applyZoom(track, anchorRatio, factor) {
+  const span = track.viewEnd - track.viewStart;
+  const anchorTime = track.viewStart + anchorRatio * span;
+  let newSpan = Math.max(MIN_VIEW_SPAN, Math.min(track.duration, span * factor));
+  setTrackView(track, anchorTime - anchorRatio * newSpan, anchorTime - anchorRatio * newSpan + newSpan);
+  syncGroupZoom(track); redrawTrack(track); updateRuler(track);
+  if (track.groupId != null) { const sibs = getSiblings(track); for (const s of sibs) { if (s.id !== track.id) { redrawTrack(s); updateRuler(s); } } }
+  updatePlayheads();
+}
+function applyPan(track, shift) {
+  const span = track.viewEnd - track.viewStart;
+  let ns = Math.max(0, Math.min(track.duration - span, track.viewStart + shift));
+  setTrackView(track, ns, ns + span);
+  syncGroupZoom(track); redrawTrack(track); updateRuler(track);
+  if (track.groupId != null) { const sibs = getSiblings(track); for (const s of sibs) { if (s.id !== track.id) { redrawTrack(s); updateRuler(s); } } }
+  updatePlayheads();
+}
+function syncGroupZoom(track) {
+  if (track.groupId == null) return;
+  const sibs = getSiblings(track);
+  for (const s of sibs) {
+    if (s.id === track.id) continue;
+    s.viewStart = track.viewStart;
+    s.viewEnd = Math.min(track.viewEnd, s.duration);
+    if (s.viewEnd - s.viewStart < MIN_VIEW_SPAN) s.viewEnd = Math.min(s.duration, s.viewStart + MIN_VIEW_SPAN);
+  }
+}
+function zoomIn() { const t=getActive(); if(t) applyZoom(t, 0.5, 1/ZOOM_FACTOR); }
+function zoomOut() { const t=getActive(); if(t) applyZoom(t, 0.5, ZOOM_FACTOR); }
+function zoomFit() {
+  const t=getActive(); if(!t) return;
+  setTrackView(t, 0, t.duration); syncGroupZoom(t); redrawTrack(t); updateRuler(t);
+  if (t.groupId != null) { const sibs = getSiblings(t); for (const s of sibs) { if (s.id !== t.id) { redrawTrack(s); updateRuler(s); } } }
+  updatePlayheads();
 }
 
 function mixDown(buf) {
@@ -832,9 +863,11 @@ function mkTrack(name, buffer, nativeSR) {
   const ny = displaySR / 2;                           // native Nyquist (display + render limit)
   return {
     id, name, buffer, duration:dur, nyquist:ny, sr:displaySR, nativeSR:displaySR, renderSR,
-    canvas:null, wrapper:null, ph:null, laneLabel:null, analysisStrip:null, analyzeBtn:null,
+    canvas:null, wrapper:null, ph:null, laneLabel:null, analysisStrip:null, analyzeBtn:null, rulerEl:null,
     playing:false, startTime:0, offset:0, source:null,
-    groupId:null, el:null, analysisResults:null
+    groupId:null, el:null, analysisResults:null,
+    viewStart:0, viewEnd:dur,
+    specData:null, specFrames:0, specHop:0, specH:0, specMaxBin:0, specGlobalPeak:-Infinity
   };
 }
 
@@ -866,15 +899,65 @@ function buildSpecBody(track, h) {
   addFreqLabels(specRow.querySelector('.freq-labels'), track.nyquist);
   const loading = specRow.querySelector('.loading-overlay');
 
+  /* Click to seek (zoom-aware) */
   track.wrapper.addEventListener('click', e => {
+    if (track.wrapper._wasDrag) { track.wrapper._wasDrag = false; return; }
     const rect = track.canvas.getBoundingClientRect();
-    const cx   = e.clientX - rect.left;
+    const cx = e.clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, cx / rect.width));
-    selectAndSeek(track, ratio * track.duration);
+    const time = track.viewStart + ratio * (track.viewEnd - track.viewStart);
+    selectAndSeek(track, time);
   });
 
-  /* Defer render until element is in the DOM so we can measure width.
-     Use setTimeout to yield to the browser so the loading spinner paints. */
+  /* Ctrl+wheel = zoom, plain wheel = horizontal scroll (when zoomed) */
+  track.wrapper.addEventListener('wheel', e => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const rect = track.canvas.getBoundingClientRect();
+      const mouseX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const factor = e.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+      applyZoom(track, mouseX, factor);
+    } else {
+      const span = track.viewEnd - track.viewStart;
+      if (span >= track.duration - 0.001) return;
+      e.preventDefault();
+      applyPan(track, (e.deltaY / 500) * span);
+    }
+  }, { passive: false });
+
+  /* Shift+drag = selection zoom */
+  let dragStartX = null, selBox = null;
+  track.wrapper.addEventListener('mousedown', e => {
+    if (e.shiftKey) {
+      e.preventDefault(); e.stopPropagation();
+      dragStartX = e.clientX;
+      selBox = document.createElement('div');
+      selBox.className = 'zoom-selection'; selBox.style.height = '100%';
+      track.wrapper.appendChild(selBox);
+    }
+  });
+  document.addEventListener('mousemove', e => {
+    if (dragStartX === null || !selBox || !track.canvas) return;
+    const rect = track.canvas.getBoundingClientRect();
+    const left = Math.max(0, Math.min(dragStartX, e.clientX) - rect.left);
+    const right = Math.min(rect.width, Math.max(dragStartX, e.clientX) - rect.left);
+    selBox.style.left = left + 'px'; selBox.style.width = (right - left) + 'px';
+  });
+  document.addEventListener('mouseup', e => {
+    if (dragStartX === null) return;
+    const rect = track.canvas.getBoundingClientRect();
+    const x1 = Math.max(0, (Math.min(dragStartX, e.clientX) - rect.left) / rect.width);
+    const x2 = Math.min(1, (Math.max(dragStartX, e.clientX) - rect.left) / rect.width);
+    if (selBox) selBox.remove(); selBox = null; dragStartX = null;
+    if (x2 - x1 < 0.01) return;
+    track.wrapper._wasDrag = true;
+    const span = track.viewEnd - track.viewStart;
+    const ns = track.viewStart + x1 * span, ne = track.viewStart + x2 * span;
+    setTrackView(track, ns, ne); syncGroupZoom(track); redrawTrack(track); updateRuler(track);
+    if (track.groupId != null) { const sibs = getSiblings(track); for (const s of sibs) { if (s.id !== track.id) { redrawTrack(s); updateRuler(s); } } }
+    updatePlayheads();
+  });
+
   track._pendingRender = () => {
     const w = track.wrapper.clientWidth;
     if (w > 0) {
@@ -890,19 +973,36 @@ function buildSpecBody(track, h) {
   return el;
 }
 
-function buildRuler(dur) {
-  const el = document.createElement('div');
-  el.className = 'time-ruler';
-  const step = dur<=3?0.5 : dur<=10?1 : dur<=30?2 : dur<=120?5 : 10;
-  const n = Math.ceil(dur/step);
-  for (let i=0; i<=n; i++) {
-    const t=i*step; if(t>dur+0.01) break;
+function niceStep(rawStep) {
+  const nice = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+  for (const n of nice) { if (n >= rawStep * 0.8) return n; }
+  return rawStep;
+}
+function populateRuler(el, viewStart, viewEnd) {
+  el.innerHTML = '';
+  const viewSpan = viewEnd - viewStart;
+  if (viewSpan <= 0) return;
+  const step = niceStep(viewSpan / 10);
+  const firstTick = Math.ceil(viewStart / step) * step;
+  for (let t = firstTick; t <= viewEnd + 0.001; t += step) {
+    const pct = ((t - viewStart) / viewSpan) * 100;
+    if (pct < -1 || pct > 101) continue;
     const m = document.createElement('span');
-    m.className='time-mark'; m.textContent=fmtShort(t);
-    m.style.width = (step/dur*100)+'%';
+    m.className = 'time-mark'; m.textContent = fmtShort(t);
+    m.style.left = pct + '%';
     el.appendChild(m);
   }
+}
+function buildRuler(track) {
+  const el = document.createElement('div');
+  el.className = 'time-ruler';
+  track.rulerEl = el;
+  populateRuler(el, track.viewStart, track.viewEnd);
   return el;
+}
+function updateRuler(track) {
+  if (!track.rulerEl) return;
+  populateRuler(track.rulerEl, track.viewStart, track.viewEnd);
 }
 
 /* ========================================================================
@@ -947,7 +1047,7 @@ function createStandalone(name, buffer, nativeSR) {
   t.analyzeBtn = hdr.querySelector('.btn-analyze');
   card.appendChild(hdr);
   card.appendChild(buildSpecBody(t, SPEC_H));
-  card.appendChild(buildRuler(t.duration));
+  card.appendChild(buildRuler(t));
   tracksBox.appendChild(card);
   t.el = card;
   tracks.push(t);
@@ -1027,7 +1127,10 @@ function createDiffGroup(baseName, items) {
   });
 
   card.appendChild(cols);
-  card.appendChild(buildRuler(maxDur));
+  const rulerTrack = grpTracks[0];
+  const rulerEl = buildRuler(rulerTrack);
+  card.appendChild(rulerEl);
+  for (const gt of grpTracks) gt.rulerEl = rulerEl;
   tracksBox.appendChild(card);
   groups.push({ id: gid, baseName, trackIds: grpTracks.map(t => t.id), el: card });
   updateLaneHighlights();
@@ -1137,7 +1240,7 @@ function refreshUI() {
   dropZone.className = has ? 'compact' : 'empty';
   dropZone.querySelector('.dz-text').textContent =
     has ? '+ Add more audio files' : 'Drop audio files here or click to browse';
-  btnPlay.disabled = !has; btnStop.disabled = !has; btnAnalyzeAll.disabled = !has;
+  btnPlay.disabled = !has; btnStop.disabled = !has; btnZoomIn.disabled = !has; btnZoomOut.disabled = !has; btnZoomFit.disabled = !has; btnAnalyzeAll.disabled = !has;
   highlightActive(); updateLaneHighlights(); updateTimeDisplay();
 }
 
@@ -1270,8 +1373,13 @@ function updatePlayheads() {
   for(const t of tracks){
     if(!t.canvas||!t.ph) continue;
     const pos=getPos(t);
-    const pct = (pos / t.duration) * 100;
-    t.ph.style.left = pct + '%';
+    const span = t.viewEnd - t.viewStart;
+    if (pos < t.viewStart || pos > t.viewEnd) {
+      t.ph.style.display = 'none';
+    } else {
+      t.ph.style.display = '';
+      t.ph.style.left = ((pos - t.viewStart) / span * 100) + '%';
+    }
   }
 }
 
@@ -1706,18 +1814,26 @@ document.addEventListener('drop',e=>{e.preventDefault();dragCounter=0;dropOverla
 
 btnPlay.addEventListener('click',togglePlay);
 btnStop.addEventListener('click',stopAll);
+btnZoomIn.addEventListener('click', zoomIn);
+btnZoomOut.addEventListener('click', zoomOut);
+btnZoomFit.addEventListener('click', zoomFit);
 btnAnalyzeAll.addEventListener('click', () => { runAnalysisAll(tracks); });
 btnClear.addEventListener('click',clearAll);
 
 document.addEventListener('keydown',e=>{
   if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+  /* Zoom shortcuts: Shift+Up/Down/Left */
+  if(e.shiftKey && e.code==='ArrowUp'){e.preventDefault();zoomIn();return;}
+  if(e.shiftKey && e.code==='ArrowDown'){e.preventDefault();zoomOut();return;}
+  if(e.shiftKey && e.code==='ArrowLeft'){e.preventDefault();zoomFit();return;}
+  /* Card navigation: Up/Down (no modifier) */
   if(!e.shiftKey && e.code==='ArrowUp'){e.preventDefault();moveToPrevCard();return;}
   if(!e.shiftKey && e.code==='ArrowDown'){e.preventDefault();moveToNextCard();return;}
   if(e.code==='Space'&&e.shiftKey){e.preventDefault();switchLane();}
   else if(e.code==='Space'){e.preventDefault();togglePlay();}
   if(e.code==='Escape'){e.preventDefault();stopAll();}
-  if(e.code==='ArrowLeft'){e.preventDefault();const t=getActive();if(t)seek(getPos(t)-2);}
-  if(e.code==='ArrowRight'){e.preventDefault();const t=getActive();if(t)seek(getPos(t)+2);}
+  if(e.code==='ArrowLeft'&&!e.shiftKey){e.preventDefault();const t=getActive();if(t)seek(getPos(t)-2);}
+  if(e.code==='ArrowRight'&&!e.shiftKey){e.preventDefault();const t=getActive();if(t)seek(getPos(t)+2);}
 });
 
 refreshUI();
