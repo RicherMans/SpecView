@@ -2,7 +2,9 @@
 
 Audio spectrogram visualizer with playback, auto-grouping for A/B comparison, and ML-powered audio classification.
 
-**Live Demo**: https://richermans.github.io/SpecView/
+Forked from [RicherMans/SpecView](https://github.com/RicherMans/SpecView), with added [VS Code extension](#vs-code-extension). The web version and VS Code extension share the same feature set.
+
+**Live Demo**: https://richermans.github.io/SpecView/ | https://xingws.github.io/SpecView/
 
 **VS Code Extension**: [Install from Marketplace](https://marketplace.visualstudio.com/items?itemName=sunxingwei.specview)
 
@@ -21,6 +23,8 @@ Audio spectrogram visualizer with playback, auto-grouping for A/B comparison, an
 Supported formats: **WAV, MP3, OGG, FLAC, M4A, AAC, WebM, WMA, AIFF, Opus**.
 
 ## Usage (Web)
+
+Try the live demo at https://richermans.github.io/SpecView/ or https://xingws.github.io/SpecView/, or run locally:
 
 1. Open `index.html` in a browser
 2. Drag & drop audio files or click to browse
@@ -98,3 +102,7 @@ code .
 ## Credits
 
 - Audio classification powered by [CED-tiny](https://huggingface.co/mispeech/ced-tiny) (ONNX Runtime Web)
+
+## Contributing
+
+Contributions are welcome! Feel free to open issues or submit pull requests.
