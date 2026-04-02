@@ -199,6 +199,28 @@ body {
   font-size: 8px; color: var(--accent); margin-left: auto;
   font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; font-weight: 600;
 }
+.lane-remove {
+  background: none; border: none; color: var(--text-sub);
+  font-size: 14px; cursor: pointer; padding: 0 3px; line-height: 1;
+  transition: color .12s; flex-shrink: 0;
+}
+.lane-remove:hover { color: var(--red); }
+.waveform-row { flex-shrink: 0; border-bottom: 1px solid #333; }
+.waveform-wrapper { position: relative; overflow: hidden; cursor: crosshair; }
+.waveform-wrapper canvas { display: block; width: 100%; }
+.waveform-labels {
+  width: 44px; position: relative; flex-shrink: 0;
+  background: #1a1a1a; border-right: 1px solid #333; overflow: hidden;
+}
+.waveform-label {
+  position: absolute; right: 4px; font-size: 8px; color: #999;
+  font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  transform: translateY(-50%); white-space: nowrap; pointer-events: none; line-height: 1;
+}
+.waveform-tick {
+  position: absolute; right: 0; width: 5px; height: 1px;
+  background: #444; pointer-events: none;
+}
 
 /* ===== SPECTROGRAM BODY ===== */
 .track-body { display: flex; background: #000; flex: 1; min-height: 0; }
@@ -351,6 +373,10 @@ body {
   <button class="btn" id="btn-zoom-fit" disabled title="Fit All (Shift+Left)">Fit</button>
   <div class="sep"></div>
   <button class="btn" id="btn-analyze-all" disabled>Analyze All</button>
+  <div class="sep"></div>
+  <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap">
+    <input type="checkbox" id="chk-waveform"> Waveform
+  </label>
   <div class="sep"></div>
   <button class="btn" id="btn-clear">Clear All</button>
 </div>
@@ -797,6 +823,7 @@ function renderSpec(track) {
 function redrawTrack(track) {
   if (!track.canvas || !track.specData) return;
   drawSpec(track);
+  if (waveformVisible && track.waveformCanvas) drawWaveform(track);
 }
 
 /* ========== ZOOM FUNCTIONS ========== */
@@ -851,6 +878,67 @@ function mixDown(buf) {
   return out;
 }
 
+/* ========== WAVEFORM ========== */
+let waveformVisible = false;
+
+function getWaveformHeight(specH) { return Math.round(specH / 3); }
+
+function addWaveformLabels(el, h) {
+  const labels = [{text:'1.0',top:5},{text:'0',top:h/2},{text:'-1.0',top:h-5}];
+  for (const l of labels) {
+    const tick = document.createElement('span');
+    tick.className = 'waveform-tick'; tick.style.top = l.top + 'px';
+    el.appendChild(tick);
+    const lbl = document.createElement('span');
+    lbl.className = 'waveform-label'; lbl.style.top = l.top + 'px'; lbl.textContent = l.text;
+    el.appendChild(lbl);
+  }
+}
+
+function drawWaveform(track) {
+  const canvas = track.waveformCanvas;
+  if (!canvas) return;
+  const refW = track.canvas ? track.canvas.width : 0;
+  if (refW > 0 && canvas.width !== refW) canvas.width = refW;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const W = canvas.width, H = canvas.height;
+  if (W === 0 || H === 0) return;
+  const buf = track.buffer;
+  const raw = buf.numberOfChannels === 1 ? buf.getChannelData(0) : mixDown(buf);
+  const sr = buf.sampleRate, nS = raw.length;
+  const startSample = Math.max(0, Math.floor(track.viewStart * sr));
+  const endSample = Math.min(nS, Math.ceil(track.viewEnd * sr));
+  const visibleSamples = endSample - startSample;
+  if (visibleSamples <= 0) return;
+  const samplesPerPixel = visibleSamples / W;
+  const mid = H / 2;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+  ctx.strokeStyle = '#4a9eff'; ctx.lineWidth = 1;
+  for (let x = 0; x < W; x++) {
+    const sStart = Math.floor(startSample + x * samplesPerPixel);
+    const sEnd = Math.min(nS, Math.ceil(startSample + (x+1) * samplesPerPixel));
+    let min = 1, max = -1;
+    for (let s = sStart; s < sEnd; s++) { const v = raw[s]; if (v < min) min = v; if (v > max) max = v; }
+    ctx.beginPath(); ctx.moveTo(x, mid - max * mid); ctx.lineTo(x, mid - min * mid); ctx.stroke();
+  }
+}
+
+function setWaveformVisible(visible) {
+  waveformVisible = visible;
+  for (const t of tracks) {
+    if (t.waveformRow) t.waveformRow.style.display = visible ? 'flex' : 'none';
+    if (visible && t.waveformCanvas) {
+      const w = t.wrapper ? t.wrapper.clientWidth : 0;
+      if (w > 0) t.waveformCanvas.width = w;
+      drawWaveform(t);
+    }
+  }
+}
+
 /* cmap replaced by pre-baked CMAP_LUT */
 
 /* ========================================================================
@@ -867,7 +955,8 @@ function mkTrack(name, buffer, nativeSR) {
     playing:false, startTime:0, offset:0, source:null,
     groupId:null, el:null, analysisResults:null,
     viewStart:0, viewEnd:dur,
-    specData:null, specFrames:0, specHop:0, specH:0, specMaxBin:0, specGlobalPeak:-Infinity
+    specData:null, specFrames:0, specHop:0, specH:0, specMaxBin:0, specGlobalPeak:-Infinity,
+    waveformCanvas:null, waveformWrapper:null, waveformRow:null, waveformPh:null
   };
 }
 
@@ -875,6 +964,27 @@ function buildSpecBody(track, h) {
   const el = document.createElement('div');
   el.className = 'track-body';
   el.style.flexDirection = 'column';
+
+  /* Waveform row (above spectrogram) */
+  const wfH = getWaveformHeight(h);
+  const waveRow = document.createElement('div');
+  waveRow.className = 'waveform-row';
+  waveRow.style.height = wfH + 'px';
+  waveRow.style.display = waveformVisible ? 'flex' : 'none';
+  waveRow.innerHTML =
+    '<div class="waveform-labels" style="height:'+wfH+'px"></div>'+
+    '<div class="waveform-wrapper" style="flex:1;position:relative;overflow:hidden;cursor:crosshair">'+
+    '<canvas height="'+wfH+'"></canvas>'+
+    '<div style="position:absolute;top:0;width:2px;height:100%;background:#ff3333;pointer-events:none;z-index:10;left:0" class="wf-playhead"></div>'+
+    '</div>';
+  el.appendChild(waveRow);
+  track.waveformRow = waveRow;
+  track.waveformWrapper = waveRow.querySelector('.waveform-wrapper');
+  track.waveformCanvas = waveRow.querySelector('canvas');
+  track.waveformPh = waveRow.querySelector('.wf-playhead');
+  addWaveformLabels(waveRow.querySelector('.waveform-labels'), wfH);
+
+  /* Spectrogram row */
   const specRow = document.createElement('div');
   specRow.style.cssText = 'display:flex;flex:1;min-height:0';
   specRow.innerHTML =
@@ -889,7 +999,7 @@ function buildSpecBody(track, h) {
   /* Analysis results strip (hidden until analysis runs) */
   const strip = document.createElement('div');
   strip.className = 'analysis-strip empty';
-  strip.style.paddingLeft = '44px'; /* align with spec (past freq-labels) */
+  strip.style.paddingLeft = '44px';
   el.appendChild(strip);
   track.analysisStrip = strip;
 
@@ -899,18 +1009,20 @@ function buildSpecBody(track, h) {
   addFreqLabels(specRow.querySelector('.freq-labels'), track.nyquist);
   const loading = specRow.querySelector('.loading-overlay');
 
-  /* Click to seek (zoom-aware) */
-  track.wrapper.addEventListener('click', e => {
+  /* Click to seek (zoom-aware) — works on both spec and waveform */
+  const seekHandler = e => {
     if (track.wrapper._wasDrag) { track.wrapper._wasDrag = false; return; }
     const rect = track.canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, cx / rect.width));
     const time = track.viewStart + ratio * (track.viewEnd - track.viewStart);
     selectAndSeek(track, time);
-  });
+  };
+  track.wrapper.addEventListener('click', seekHandler);
+  track.waveformWrapper.addEventListener('click', seekHandler);
 
   /* Ctrl+wheel = zoom, plain wheel = horizontal scroll (when zoomed) */
-  track.wrapper.addEventListener('wheel', e => {
+  const wheelHandler = e => {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       const rect = track.canvas.getBoundingClientRect();
@@ -923,7 +1035,9 @@ function buildSpecBody(track, h) {
       e.preventDefault();
       applyPan(track, (e.deltaY / 500) * span);
     }
-  }, { passive: false });
+  };
+  track.wrapper.addEventListener('wheel', wheelHandler, { passive: false });
+  track.waveformWrapper.addEventListener('wheel', wheelHandler, { passive: false });
 
   /* Shift+drag = selection zoom */
   let dragStartX = null, selBox = null;
@@ -962,8 +1076,10 @@ function buildSpecBody(track, h) {
     const w = track.wrapper.clientWidth;
     if (w > 0) {
       track.canvas.width = w;
+      if (track.waveformCanvas) track.waveformCanvas.width = w;
       setTimeout(() => {
         renderSpec(track);
+        if (waveformVisible && track.waveformCanvas) drawWaveform(track);
         if (loading.parentNode) loading.remove();
       }, 0);
     } else {
@@ -1110,9 +1226,11 @@ function createDiffGroup(baseName, items) {
       '<span class="diff-lane-name">'+esc(item.name)+'</span>'+
       '<button class="btn-analyze" title="Run audio classification">Analyze</button>'+
       '<span class="card-info">'+(t.sr/1000).toFixed(1)+'kHz</span>'+
-      '<span class="diff-lane-playing"></span>';
+      '<span class="diff-lane-playing"></span>'+
+      '<button class="lane-remove" title="Remove this track">&times;</button>';
     lbl.addEventListener('click', () => { setActive(t.id); updateLaneHighlights(); });
     lbl.querySelector('.btn-analyze').addEventListener('click', e => { e.stopPropagation(); runAnalysis(t); });
+    lbl.querySelector('.lane-remove').addEventListener('click', e => { e.stopPropagation(); deleteTrackFromGroup(t.id); });
     t.analyzeBtn = lbl.querySelector('.btn-analyze');
     lane.appendChild(lbl);
     t.laneLabel = lbl;
@@ -1155,6 +1273,42 @@ function removeDiffGroup(gid) {
     activeTrackId = tracks.length ? tracks[0].id : null;
   refreshUI();
 }
+
+function deleteTrackFromGroup(trackId) {
+  const t = tracks.find(tr => tr.id === trackId);
+  if (!t) return;
+  if (t.playing) stopSource(t);
+  if (t.groupId == null) { removeTrack(t.id); return; }
+  const g = groups.find(gr => gr.id === t.groupId);
+  if (!g) { removeTrack(t.id); return; }
+  const ph = insertPlaceholderBefore(g.el);
+  if (g.trackIds.length <= 2) {
+    const remainingId = g.trackIds.find(id => id !== t.id);
+    const remaining = tracks.find(tr => tr.id === remainingId);
+    if (remaining) {
+      const { name, buffer, nativeSR } = remaining;
+      if (remaining.playing) stopSource(remaining);
+      removeDiffGroupQuietly(g.id);
+      createStandalone(name, buffer, nativeSR);
+    } else { removeDiffGroupQuietly(g.id); }
+  } else {
+    const baseName = g.baseName;
+    const remainingItems = g.trackIds.filter(id => id !== t.id).map(id => {
+      const tr = tracks.find(x => x.id === id);
+      if (!tr) return null;
+      const tag = extractTag(stripExt(tr.name)).tag || tr.name;
+      return { name: tr.name, buffer: tr.buffer, suffix: tag, nativeSR: tr.nativeSR };
+    }).filter(Boolean);
+    removeDiffGroupQuietly(g.id);
+    if (remainingItems.length >= 2) createDiffGroup(baseName, remainingItems);
+    else if (remainingItems.length === 1) { const it = remainingItems[0]; createStandalone(it.name, it.buffer, it.nativeSR); }
+  }
+  const newCard = tracksBox.lastElementChild;
+  if (newCard && newCard !== ph && ph.parentNode) tracksBox.insertBefore(newCard, ph);
+  ph.remove();
+  refreshUI();
+}
+function deleteActiveTrack() { const t = getActive(); if (t) deleteTrackFromGroup(t.id); }
 
 function updateLaneHighlights() {
   for (const t of tracks) {
@@ -1376,9 +1530,12 @@ function updatePlayheads() {
     const span = t.viewEnd - t.viewStart;
     if (pos < t.viewStart || pos > t.viewEnd) {
       t.ph.style.display = 'none';
+      if (t.waveformPh) t.waveformPh.style.display = 'none';
     } else {
       t.ph.style.display = '';
-      t.ph.style.left = ((pos - t.viewStart) / span * 100) + '%';
+      const pct = ((pos - t.viewStart) / span * 100) + '%';
+      t.ph.style.left = pct;
+      if (t.waveformPh) { t.waveformPh.style.display = ''; t.waveformPh.style.left = pct; }
     }
   }
 }
@@ -1818,6 +1975,8 @@ btnZoomIn.addEventListener('click', zoomIn);
 btnZoomOut.addEventListener('click', zoomOut);
 btnZoomFit.addEventListener('click', zoomFit);
 btnAnalyzeAll.addEventListener('click', () => { runAnalysisAll(tracks); });
+const chkWaveform = document.getElementById('chk-waveform');
+chkWaveform.addEventListener('change', () => { setWaveformVisible(chkWaveform.checked); });
 btnClear.addEventListener('click',clearAll);
 
 document.addEventListener('keydown',e=>{
@@ -1826,6 +1985,8 @@ document.addEventListener('keydown',e=>{
   if(e.shiftKey && e.code==='ArrowUp'){e.preventDefault();zoomIn();return;}
   if(e.shiftKey && e.code==='ArrowDown'){e.preventDefault();zoomOut();return;}
   if(e.shiftKey && e.code==='ArrowLeft'){e.preventDefault();zoomFit();return;}
+  /* Delete active track */
+  if(e.code==='Delete'){e.preventDefault();deleteActiveTrack();return;}
   /* Card navigation: Up/Down (no modifier) */
   if(!e.shiftKey && e.code==='ArrowUp'){e.preventDefault();moveToPrevCard();return;}
   if(!e.shiftKey && e.code==='ArrowDown'){e.preventDefault();moveToNextCard();return;}
