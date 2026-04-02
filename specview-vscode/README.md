@@ -126,6 +126,7 @@ Files with the same name from different directories are automatically grouped, w
 | `Shift + ↑` | Zoom in (time axis) |
 | `Shift + ↓` | Zoom out (time axis) |
 | `Shift + ←` | Reset zoom (fit all) |
+| `Delete` | Remove active track (or remove lane from group) |
 
 ## Requirements
 

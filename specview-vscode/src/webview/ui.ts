@@ -266,6 +266,9 @@ function buildSpecBody(track: Track, h: number): HTMLElement {
       }
       setTimeout(() => {
         renderSpec(track);
+        if (waveformVisible && track.waveformCanvas) {
+          drawWaveform(track);
+        }
         if (loading.parentNode) loading.remove();
       }, 0);
     } else {
@@ -690,6 +693,26 @@ function findExistingGroupByStem(stem: string): Group | null {
   return null;
 }
 
+// ========== POSITION HELPERS ==========
+
+/** Insert a placeholder div before an element to mark its position in tracksBox */
+function insertPlaceholderBefore(el: HTMLElement | null): HTMLElement {
+  const ph = document.createElement('div');
+  if (el && el.parentNode === tracksBox) {
+    tracksBox.insertBefore(ph, el);
+  }
+  return ph;
+}
+
+/** Move the last child of tracksBox (newly created card) to the placeholder position */
+function placeCardAtPosition(placeholder: HTMLElement): void {
+  const newCard = tracksBox.lastElementChild;
+  if (newCard && newCard !== placeholder && placeholder.parentNode) {
+    tracksBox.insertBefore(newCard, placeholder);
+  }
+  placeholder.remove();
+}
+
 function createStandalone(name: string, buffer: AudioBuffer, nativeSR: number, filePath?: string): void {
   const t = mkTrack(name, buffer, nativeSR, filePath);
   const chL = buffer.numberOfChannels === 1 ? 'Mono' : buffer.numberOfChannels === 2 ? 'Stereo' : buffer.numberOfChannels + 'ch';
@@ -757,9 +780,11 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): void {
       '<span class="diff-lane-name">' + esc(item.name) + '</span>' +
       '<button class="btn-analyze" title="Run audio classification">Analyze</button>' +
       '<span class="card-info">' + (t.sr / 1000).toFixed(1) + 'kHz</span>' +
-      '<span class="diff-lane-playing"></span>';
+      '<span class="diff-lane-playing"></span>' +
+      '<button class="lane-remove" title="Remove this track">&times;</button>';
     lbl.addEventListener('click', () => { setActive(t.id); updateLaneHighlights(); });
     lbl.querySelector('.btn-analyze')!.addEventListener('click', e => { e.stopPropagation(); runAnalysis(t); });
+    lbl.querySelector('.lane-remove')!.addEventListener('click', e => { e.stopPropagation(); deleteTrackFromGroup(t.id); });
     t.analyzeBtn = lbl.querySelector('.btn-analyze');
     lane.appendChild(lbl);
     t.laneLabel = lbl;
@@ -800,9 +825,11 @@ function addToDiffGroup(grp: Group, newItem: DecodedItem): void {
     return { name: t.name, buffer: t.buffer, suffix, nativeSR: t.nativeSR, filePath: t.filePath } as DecodedItem;
   }).filter(Boolean) as DecodedItem[];
 
+  const ph = insertPlaceholderBefore(grp.el);
   removeDiffGroupQuietly(grp.id);
   existingItems.push(newItem);
   createDiffGroup(grp.baseName, existingItems);
+  placeCardAtPosition(ph);
 }
 
 function removeTrack(id: number): void {
@@ -811,6 +838,10 @@ function removeTrack(id: number): void {
   const t = tracks[i];
   if (t.playing) stopSource(t);
   if (t.groupId != null) { removeDiffGroup(t.groupId); return; }
+  // Notify extension host to allow re-adding this file
+  if (t.filePath) {
+    (window as any).__vscodePostMessage({ type: 'removeFromLoaded', filePath: t.filePath });
+  }
   if (t.el) t.el.remove();
   tracks.splice(i, 1);
   if (activeTrackId === id) activeTrackId = tracks.length ? tracks[0].id : null;
@@ -824,6 +855,10 @@ function removeDiffGroup(gid: number): void {
   for (const tid of grp.trackIds) {
     const ti = tracks.findIndex(t => t.id === tid);
     if (ti >= 0) {
+      // Notify extension host to allow re-adding this file
+      if (tracks[ti].filePath) {
+        (window as any).__vscodePostMessage({ type: 'removeFromLoaded', filePath: tracks[ti].filePath });
+      }
       if (tracks[ti].playing) stopSource(tracks[ti]);
       tracks.splice(ti, 1);
     }
@@ -833,6 +868,80 @@ function removeDiffGroup(gid: number): void {
   if (activeTrackId && !tracks.find(t => t.id === activeTrackId))
     activeTrackId = tracks.length ? tracks[0].id : null;
   refreshUI();
+}
+
+function deleteTrackFromGroup(trackId: number): void {
+  const t = tracks.find(tr => tr.id === trackId);
+  if (!t) return;
+  if (t.playing) stopSource(t);
+
+  // Notify extension host to allow re-adding this file
+  if (t.filePath) {
+    (window as any).__vscodePostMessage({ type: 'removeFromLoaded', filePath: t.filePath });
+  }
+
+  if (t.groupId == null) {
+    // Standalone track — just remove it
+    removeTrack(t.id);
+    return;
+  }
+
+  const g = groups.find(gr => gr.id === t.groupId);
+  if (!g) { removeTrack(t.id); return; }
+
+  // Use placeholder to preserve card position in DOM
+  const placeholder = document.createElement('div');
+  tracksBox.insertBefore(placeholder, g.el);
+
+  if (g.trackIds.length <= 2) {
+    // Group has 2 lanes — remove current, convert remaining to standalone
+    const remainingId = g.trackIds.find(id => id !== t.id);
+    const remaining = tracks.find(tr => tr.id === remainingId);
+    if (remaining) {
+      const { name, buffer, nativeSR, filePath } = remaining;
+      if (remaining.playing) stopSource(remaining);
+      removeDiffGroupQuietly(g.id);
+      createStandalone(name, buffer, nativeSR, filePath);
+    } else {
+      removeDiffGroupQuietly(g.id);
+    }
+  } else {
+    // Group has 3+ lanes — remove current lane, rebuild group with remaining
+    const baseName = g.baseName;
+    const remainingItems = g.trackIds
+      .filter(id => id !== t.id)
+      .map(id => {
+        const tr = tracks.find(x => x.id === id);
+        if (!tr) return null;
+        const tag = extractTag(stripExt(tr.name)).tag;
+        const suffix = tag || (tr.filePath ? getParentFolderName(tr.filePath) : tr.name);
+        return { name: tr.name, buffer: tr.buffer, suffix, nativeSR: tr.nativeSR, filePath: tr.filePath } as DecodedItem;
+      })
+      .filter(Boolean) as DecodedItem[];
+
+    removeDiffGroupQuietly(g.id);
+    if (remainingItems.length >= 2) {
+      createDiffGroup(baseName, remainingItems);
+    } else if (remainingItems.length === 1) {
+      const it = remainingItems[0];
+      createStandalone(it.name, it.buffer, it.nativeSR, it.filePath);
+    }
+  }
+
+  // Move newly created card (at end of tracksBox) to placeholder position
+  const newCard = tracksBox.lastElementChild;
+  if (newCard && newCard !== placeholder && placeholder.parentNode) {
+    tracksBox.insertBefore(newCard, placeholder);
+  }
+  placeholder.remove();
+
+  refreshUI();
+}
+
+export function deleteActiveTrack(): void {
+  const t = getActive();
+  if (!t) return;
+  deleteTrackFromGroup(t.id);
 }
 
 export function clearAll(): void {
@@ -889,9 +998,11 @@ export function handleFiles(items: DecodedItem[]): void {
   for (const grp of grouped) {
     if (grp.items.length >= 2) {
       const existingMatch = findExistingStandaloneByStem(grp.baseName);
+      let ph: HTMLElement | null = null;
       if (existingMatch) {
         const oldTrack = existingMatch;
         const oldTag = extractTag(stripExt(oldTrack.name)).tag || oldTrack.name;
+        ph = insertPlaceholderBefore(oldTrack.el);
         removeTrackQuietly(oldTrack.id);
         grp.items.push({ name: oldTrack.name, buffer: oldTrack.buffer, suffix: oldTag, nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath });
       }
@@ -914,6 +1025,7 @@ export function handleFiles(items: DecodedItem[]): void {
       }
       computeDisplayNames(grp.items);
       createDiffGroup(grp.baseName, grp.items);
+      if (ph) placeCardAtPosition(ph);
     } else {
       const newItem = grp.items[0];
       const { stem, tag } = extractTag(stripExt(newItem.name));
@@ -923,6 +1035,7 @@ export function handleFiles(items: DecodedItem[]): void {
         // Known tag: merge with existing standalone
         const oldTrack = existingMatch;
         const oldTag = extractTag(stripExt(oldTrack.name)).tag || oldTrack.name;
+        const ph = insertPlaceholderBefore(oldTrack.el);
         removeTrackQuietly(oldTrack.id);
         const mergeItems: DecodedItem[] = [
           { name: oldTrack.name, buffer: oldTrack.buffer, suffix: oldTag, nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath },
@@ -930,9 +1043,11 @@ export function handleFiles(items: DecodedItem[]): void {
         ];
         computeDisplayNames(mergeItems);
         createDiffGroup(stem, mergeItems);
+        placeCardAtPosition(ph);
       } else if (existingMatch && newItem.filePath && existingMatch.filePath !== newItem.filePath) {
         // No known tag, but same stem and different directories — same-name different-dir merge
         const oldTrack = existingMatch;
+        const ph = insertPlaceholderBefore(oldTrack.el);
         removeTrackQuietly(oldTrack.id);
         const mergeItems: DecodedItem[] = [
           { name: oldTrack.name, buffer: oldTrack.buffer, suffix: getParentFolderName(oldTrack.filePath || ''), nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath },
@@ -940,6 +1055,7 @@ export function handleFiles(items: DecodedItem[]): void {
         ];
         computeDisplayNames(mergeItems);
         createDiffGroup(stem, mergeItems);
+        placeCardAtPosition(ph);
       } else {
         const existingGroup = findExistingGroupByStem(stem);
         if (existingGroup && tag) {

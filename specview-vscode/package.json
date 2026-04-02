@@ -3,7 +3,7 @@
   "displayName": "SpecView - Spectrogram Viewer",
   "description": "Audio spectrogram viewer with playback, auto-grouping for A/B comparison, and ML-powered audio classification",
   "version": "0.1.0",
-  "publisher": "specview",
+  "publisher": "sunxingwei",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
   "repository": {

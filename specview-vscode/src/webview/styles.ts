@@ -186,6 +186,12 @@ body {
   font-size: 8px; color: var(--accent); margin-left: auto;
   font-family: var(--vscode-editor-font-family, 'Consolas', monospace); font-weight: 600;
 }
+.lane-remove {
+  background: none; border: none; color: var(--text-sub);
+  font-size: 14px; cursor: pointer; padding: 0 3px; line-height: 1;
+  transition: color .12s; flex-shrink: 0;
+}
+.lane-remove:hover { color: var(--red); }
 
 .track-body { display: flex; background: #000; flex: 1; min-height: 0; }
 .freq-labels {

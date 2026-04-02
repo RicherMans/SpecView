@@ -3,7 +3,7 @@ import {
   initUI, handleFiles, togglePlay, stopAll, clearAll, seek,
   getActive, switchLane, getTracks,
   zoomIn, zoomOut, zoomFit, setWaveformVisible, pauseAll,
-  moveToNextCard, moveToPrevCard,
+  moveToNextCard, moveToPrevCard, deleteActiveTrack,
 } from './ui';
 import { getPos } from './audio';
 import { runAnalysisAll } from './analysis';
@@ -135,6 +135,9 @@ document.addEventListener('keydown', e => {
   // Card navigation: Up / Down (no modifier)
   if (!e.shiftKey && e.code === 'ArrowUp') { e.preventDefault(); moveToPrevCard(); return; }
   if (!e.shiftKey && e.code === 'ArrowDown') { e.preventDefault(); moveToNextCard(); return; }
+
+  // Delete active track
+  if (e.code === 'Delete') { e.preventDefault(); deleteActiveTrack(); return; }
 
   if (e.code === 'Space' && e.shiftKey) { e.preventDefault(); switchLane(); }
   else if (e.code === 'Space') { e.preventDefault(); togglePlay(); }

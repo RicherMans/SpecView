@@ -105,6 +105,10 @@ export class SpecViewEditorProvider implements vscode.CustomReadonlyEditorProvid
         }
       } else if (msg.type === 'clearLoaded') {
         this.loadedFiles.clear();
+      } else if (msg.type === 'removeFromLoaded') {
+        if (msg.filePath) {
+          this.loadedFiles.delete(msg.filePath);
+        }
       } else if (msg.type === 'requestModel') {
         try {
           const modelUri = await this.ensureModel(context, (status, loaded, total) => {
