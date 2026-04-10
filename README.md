@@ -2,7 +2,10 @@
 
 Audio spectrogram visualizer with playback, auto-grouping for A/B comparison, and ML-powered audio classification.
 
-Forked from [RicherMans/SpecView](https://github.com/RicherMans/SpecView), with added [VS Code extension](#vs-code-extension). The web version and VS Code extension share the same feature set.
+Co-developed across two repositories:
+
+- **[RicherMans/SpecView](https://github.com/RicherMans/SpecView)** — original web version by Heinrich
+- **[xingws/SpecView](https://github.com/xingws/SpecView)** — VS Code extension and feature enhancements by xingws
 
 **Live Demo**: https://richermans.github.io/SpecView/ | https://xingws.github.io/SpecView/
 
@@ -11,16 +14,18 @@ Forked from [RicherMans/SpecView](https://github.com/RicherMans/SpecView), with 
 ## Features
 
 - **Spectrogram Visualization** — hot-metal colormap, frequency labels, time ruler
-- **Audio Playback** — play, pause, stop, seek, volume; click spectrogram to seek (preserves playback state)
-- **Auto-Grouping** — 32 recognized tags for A/B comparison with `_` or `-` separators (suffix and prefix modes)
-- **Time Axis Zoom** — Ctrl+wheel zoom, Shift+drag box selection, toolbar +/–/Fit buttons; STFT cached for instant redraw; group tracks zoom in sync
-- **Time-Domain Waveform** — toggle via toolbar Waveform checkbox; amplitude labels (-1.0, 0, 1.0); time-aligned with spectrogram
-- **ML Audio Classification** — CED-tiny ONNX model (527 AudioSet labels); Analyze All / Analyze Group / per-track buttons; colored analysis strip below spectrogram
-- **Track Management** — Delete key to remove active track; per-lane × button in diff groups; card position preserved on deletion/merge
-- **Card Navigation** — Up/Down arrow keys to switch between tracks with smooth scrolling
-- **Auto-Pause** — playback pauses when browser tab or VS Code panel loses focus
+- **Audio Playback** — play, pause, stop, seek, volume; click spectrogram to seek
+- **Auto-Grouping** — 32 recognized tags for A/B comparison (suffix and prefix modes)
+- **Tar/Tar.gz Archive Support** — open archives containing audio files; files extracted on demand
+- **Time Axis Zoom** — Ctrl+wheel zoom, Shift+drag box selection, toolbar +/–/Fit; STFT cached; group sync
+- **Time-Domain Waveform** — toggle via toolbar; amplitude labels; time-aligned with spectrogram
+- **Lazy Loading** — large file sets decode on scroll; batched card creation with "Load More" button
+- **ML Audio Classification** — CED-tiny ONNX model (527 AudioSet labels); Analyze All / Group / per-track
+- **Track Management** — Delete key or × button; card position preserved on deletion/merge
+- **Card Navigation** — Up/Down arrow keys with smooth scrolling
+- **Auto-Pause** — playback pauses when tab/panel loses focus
 
-Supported formats: **WAV, MP3, OGG, FLAC, M4A, AAC, WebM, WMA, AIFF, Opus**.
+Supported formats: **WAV, MP3, OGG, FLAC, M4A, AAC, WebM, WMA, AIFF, Opus** — plus **.tar / .tar.gz / .tgz** archives.
 
 ## Usage (Web)
 
@@ -67,7 +72,7 @@ Or visit: https://marketplace.visualstudio.com/items?itemName=sunxingwei.specvie
 cd specview-vscode
 npm install && node esbuild.mjs
 npx @vscode/vsce package
-code --install-extension specview-0.1.1.vsix
+code --install-extension specview-0.1.2.vsix
 ```
 
 ### Additional Extension Features
@@ -75,11 +80,12 @@ code --install-extension specview-0.1.1.vsix
 Beyond all web version features, the VS Code extension adds:
 
 - **Custom editor** — double-click audio files to open directly in SpecView
-- **Explorer integration** — right-click multiple audio files → "Open with SpecView" → opens in one panel
-- **ONNX model disk caching** — model downloaded once, cached across sessions (no re-download on restart)
-- **Same-name different-directory grouping** — files with same name from different directories auto-grouped with parent folder name as tag
-- **File deduplication** — already loaded files are silently skipped; removed files can be re-added
-- **VS Code theme integration** — adapts to light and dark themes via CSS variables
+- **Explorer integration** — right-click files → "Open with SpecView"; right-click folder → "Open folder with SpecView"
+- **Folder loading** — loads all top-level audio files sorted by filename (natural sort)
+- **ONNX model disk caching** — model downloaded once, cached across sessions
+- **Same-name different-directory grouping** — files with same name from different dirs auto-grouped with parent folder name as tag
+- **File deduplication** — already loaded files silently skipped; removed files can be re-added
+- **VS Code theme integration** — adapts to light and dark themes
 
 ### Development
 
@@ -101,8 +107,10 @@ code .
 
 ## Credits
 
+- Original [SpecView](https://github.com/RicherMans/SpecView) web version by Heinrich
+- VS Code extension and feature enhancements by [xingws](https://github.com/xingws)
 - Audio classification powered by [CED-tiny](https://huggingface.co/mispeech/ced-tiny) (ONNX Runtime Web)
 
 ## Contributing
 
-Contributions are welcome! Feel free to open issues or submit pull requests.
+Contributions are welcome! Feel free to open issues or submit pull requests on either repository.
