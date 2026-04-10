@@ -930,7 +930,7 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): void {
   cols.className = 'diff-columns';
 
   items.forEach((item, idx) => {
-    const t = mkTrack(item.name, item.buffer, item.nativeSR, item.filePath);
+    const t = mkTrack(item.name, item.buffer, item.nativeSR, item.filePath, item.lazyUri);
     t.groupId = gid;
     const lane = document.createElement('div');
     lane.className = 'diff-lane';
@@ -993,7 +993,7 @@ function addToDiffGroup(grp: Group, newItem: DecodedItem): void {
     if (!t) return null;
     const tag = extractTag(stripExt(t.name)).tag;
     const suffix = tag || (t.filePath ? getParentFolderName(t.filePath) : t.name);
-    return { name: t.name, buffer: t.buffer, suffix, nativeSR: t.nativeSR, filePath: t.filePath } as DecodedItem;
+    return { name: t.name, buffer: t.buffer, suffix, nativeSR: t.nativeSR, filePath: t.filePath, lazyUri: t.lazyUri } as DecodedItem;
   }).filter(Boolean) as DecodedItem[];
 
   const ph = insertPlaceholderBefore(grp.el);
@@ -1085,7 +1085,7 @@ function deleteTrackFromGroup(trackId: number): void {
         if (!tr) return null;
         const tag = extractTag(stripExt(tr.name)).tag;
         const suffix = tag || (tr.filePath ? getParentFolderName(tr.filePath) : tr.name);
-        return { name: tr.name, buffer: tr.buffer, suffix, nativeSR: tr.nativeSR, filePath: tr.filePath } as DecodedItem;
+        return { name: tr.name, buffer: tr.buffer, suffix, nativeSR: tr.nativeSR, filePath: tr.filePath, lazyUri: tr.lazyUri } as DecodedItem;
       })
       .filter(Boolean) as DecodedItem[];
 
@@ -1094,7 +1094,7 @@ function deleteTrackFromGroup(trackId: number): void {
       createDiffGroup(baseName, remainingItems);
     } else if (remainingItems.length === 1) {
       const it = remainingItems[0];
-      createStandalone(it.name, it.buffer, it.nativeSR, it.filePath);
+      createStandalone(it.name, it.buffer, it.nativeSR, it.filePath, it.lazyUri);
     }
   }
 
@@ -1163,7 +1163,7 @@ export function handleFiles(items: DecodedItem[]): void {
         const oldTag = extractTag(stripExt(oldTrack.name)).tag || oldTrack.name;
         ph = insertPlaceholderBefore(oldTrack.el);
         removeTrackQuietly(oldTrack.id);
-        grp.items.push({ name: oldTrack.name, buffer: oldTrack.buffer, suffix: oldTag, nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath });
+        grp.items.push({ name: oldTrack.name, buffer: oldTrack.buffer, suffix: oldTag, nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath, lazyUri: oldTrack.lazyUri });
       }
       // For same-name same-tag files from different directories, set suffix to parent folder
       const hasFilePath = grp.items.some(i => i.filePath);
@@ -1197,7 +1197,7 @@ export function handleFiles(items: DecodedItem[]): void {
         const ph = insertPlaceholderBefore(oldTrack.el);
         removeTrackQuietly(oldTrack.id);
         const mergeItems: DecodedItem[] = [
-          { name: oldTrack.name, buffer: oldTrack.buffer, suffix: oldTag, nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath },
+          { name: oldTrack.name, buffer: oldTrack.buffer, suffix: oldTag, nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath, lazyUri: oldTrack.lazyUri },
           { ...newItem, suffix: tag },
         ];
         computeDisplayNames(mergeItems);
@@ -1209,7 +1209,7 @@ export function handleFiles(items: DecodedItem[]): void {
         const ph = insertPlaceholderBefore(oldTrack.el);
         removeTrackQuietly(oldTrack.id);
         const mergeItems: DecodedItem[] = [
-          { name: oldTrack.name, buffer: oldTrack.buffer, suffix: getParentFolderName(oldTrack.filePath || ''), nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath },
+          { name: oldTrack.name, buffer: oldTrack.buffer, suffix: getParentFolderName(oldTrack.filePath || ''), nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath, lazyUri: oldTrack.lazyUri },
           { ...newItem, suffix: getParentFolderName(newItem.filePath) },
         ];
         computeDisplayNames(mergeItems);
@@ -1296,6 +1296,9 @@ export function clearAll(): void {
   groups = [];
   activeTrackId = null;
   fileURIsQueue = [];
+  loadQueue.length = 0;
+  activeLoads = 0;
+  lazyObserver.disconnect();
   if (loadMoreBtn) { loadMoreBtn.remove(); loadMoreBtn = null; }
   tracksBox.innerHTML = '';
   refreshUI();

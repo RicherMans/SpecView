@@ -31,30 +31,42 @@ const vscode = acquireVsCodeApi();
 // Listen for messages from extension host
 const fileDataCallbacks = new Map<string, { resolve: (raw: ArrayBuffer) => void; reject: (e: Error) => void }>();
 
-// Serial message queue — ensures filesData finishes decoding before fileURIs creates lazy cards.
-// Without this, fileURIs (sync) would run before filesData (async decode) completes,
-// causing lazy cards to appear before decoded cards in the DOM.
+// Message handling: lazy-load callbacks are resolved synchronously (fast path),
+// everything else goes through a serial queue to preserve ordering
+// (ensures filesData finishes decoding before fileURIs creates lazy cards).
 let messageQueue = Promise.resolve();
 
 window.addEventListener('message', (event) => {
   const msg = event.data;
+
+  // Fast path: resolve lazy-load callbacks synchronously without entering the queue.
+  // This avoids blocking on large batch decodes that may be in the queue.
+  if (msg.type === 'fileData' && msg.filePath) {
+    const cb = fileDataCallbacks.get(msg.filePath);
+    if (cb) {
+      fileDataCallbacks.delete(msg.filePath);
+      cb.resolve(base64ToArrayBuffer(msg.base64));
+      return;
+    }
+    // Late response after timeout — discard
+    if (msg.filePath.startsWith('file://') || msg.filePath.startsWith('tar:')) return;
+  }
+  if (msg.type === 'fileDataError') {
+    const cb = fileDataCallbacks.get(msg.uri);
+    if (cb) {
+      fileDataCallbacks.delete(msg.uri);
+      cb.reject(new Error(msg.message));
+    }
+    return;
+  }
+
+  // Serial queue for everything else
   messageQueue = messageQueue.then(() => handleMessage(msg)).catch(e => console.error('Message handler error:', e));
 });
 
 async function handleMessage(msg: any): Promise<void> {
   if (msg.type === 'fileData') {
     const raw = base64ToArrayBuffer(msg.base64);
-    // Check if this is a response to a lazy load request
-    if (msg.filePath) {
-      const cb = fileDataCallbacks.get(msg.filePath);
-      if (cb) {
-        fileDataCallbacks.delete(msg.filePath);
-        cb.resolve(raw);
-        return;
-      }
-      // Late response after timeout — discard to avoid duplicate tracks
-      if (msg.filePath.startsWith('file://') || msg.filePath.startsWith('tar:')) return;
-    }
     await decodeAndAddFile(msg.name, msg.filePath, raw);
   } else if (msg.type === 'filesData') {
     await decodeAndAddBatch(msg.files);
@@ -62,12 +74,6 @@ async function handleMessage(msg: any): Promise<void> {
     await decodeAndAddBatch(msg.files);
   } else if (msg.type === 'fileURIs') {
     handleFileURIs(msg.files);
-  } else if (msg.type === 'fileDataError') {
-    const cb = fileDataCallbacks.get(msg.uri);
-    if (cb) {
-      fileDataCallbacks.delete(msg.uri);
-      cb.reject(new Error(msg.message));
-    }
   } else if (msg.type === 'error') {
     console.error('Extension error:', msg.message);
   }

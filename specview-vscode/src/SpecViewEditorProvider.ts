@@ -26,13 +26,7 @@ function isAudioFile(name: string): boolean {
 }
 
 function uint8ToBase64(data: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 8192;
-  for (let i = 0; i < data.length; i += chunkSize) {
-    const chunk = data.subarray(i, Math.min(i + chunkSize, data.length));
-    binary += String.fromCharCode(...chunk);
-  }
-  return Buffer.from(binary, 'binary').toString('base64');
+  return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('base64');
 }
 
 /**
@@ -373,9 +367,10 @@ export class SpecViewEditorProvider implements vscode.CustomReadonlyEditorProvid
       try {
         const data = await vscode.workspace.fs.readFile(archiveUri);
         const archiveName = path.basename(archiveUri.fsPath);
-        const cacheKey = archiveName;
+        const cacheKey = archiveUri.fsPath;
         const { buffer, entries } = await parseTarIndex(new Uint8Array(data), archiveName);
         this.tarCache.set(cacheKey, { buffer, entries });
+        this.loadedFiles.add(archiveUri.fsPath);
 
         const displayName = (n: string) => n.split('/').pop() || n;
 

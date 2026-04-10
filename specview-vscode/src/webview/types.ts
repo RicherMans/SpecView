@@ -64,6 +64,7 @@ export interface DecodedItem {
   buffer: AudioBuffer;
   nativeSR: number;
   suffix?: string;
+  lazyUri?: string;    // for lazy tracks that haven't been loaded yet
 }
 
 export interface GroupResult {
