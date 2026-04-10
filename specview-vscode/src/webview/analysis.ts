@@ -302,6 +302,7 @@ function renderAnalysisStrip(track: Track): void {
 
 export async function runAnalysis(track: Track): Promise<void> {
   if (track.analysisResults) return;
+  if (!track.buffer) return;
   const btn = track.analyzeBtn;
   const strip = track.analysisStrip;
   if (!btn || !strip) return;
@@ -381,20 +382,20 @@ export async function runAnalysis(track: Track): Promise<void> {
   btn.textContent = 'Done';
 }
 
-/** Analyze all tracks sequentially (skips already-analyzed tracks) */
+/** Analyze all loaded tracks sequentially (skips unloaded and already-analyzed tracks) */
 export async function runAnalysisAll(allTracks: Track[]): Promise<void> {
   for (const t of allTracks) {
-    if (!t.analysisResults) {
+    if (!t.analysisResults && t.loaded) {
       await runAnalysis(t);
     }
   }
 }
 
-/** Analyze all tracks in a specific group sequentially */
+/** Analyze all loaded tracks in a specific group sequentially */
 export async function runAnalysisGroup(allTracks: Track[], groupId: number): Promise<void> {
   const groupTracks = allTracks.filter(t => t.groupId === groupId);
   for (const t of groupTracks) {
-    if (!t.analysisResults) {
+    if (!t.analysisResults && t.loaded) {
       await runAnalysis(t);
     }
   }

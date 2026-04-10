@@ -87,6 +87,7 @@ function mixDown(buf: AudioBuffer): Float32Array {
  * Call this once when the track is first loaded.
  */
 export function computeSpec(track: Track, H: number): void {
+  if (!track.buffer) return;
   const { buffer, nyquist } = track;
   const sr = buffer.sampleRate;
   const raw = buffer.numberOfChannels === 1 ? buffer.getChannelData(0) : mixDown(buffer);
@@ -99,8 +100,17 @@ export function computeSpec(track: Track, H: number): void {
   const binHz = sr / FFT_SIZE;
   const maxBin = Math.min(nBins - 1, Math.ceil(nyquist / binHz));
 
-  const hop = FFT_SIZE / HOP_DIV;
-  const nF = Math.max(1, Math.floor((nS - FFT_SIZE) / hop) + 1);
+  // Adaptive hop: use smaller hop for short files to fill the canvas width
+  const W = track.canvas ? track.canvas.width : 1000;
+  const defaultHop = FFT_SIZE / HOP_DIV;
+  const defaultFrames = Math.max(1, Math.floor((nS - FFT_SIZE) / defaultHop) + 1);
+  let hop: number;
+  if (defaultFrames < W && nS > FFT_SIZE) {
+    hop = Math.max(1, Math.floor((nS - FFT_SIZE) / (W - 1)));
+  } else {
+    hop = defaultHop;
+  }
+  const nF = Math.max(1, Math.min(W, Math.floor((nS - FFT_SIZE) / hop) + 1));
 
   const re = new Float64Array(FFT_SIZE);
   const im = new Float64Array(FFT_SIZE);
@@ -151,6 +161,7 @@ export function computeSpec(track: Track, H: number): void {
  * Fast operation — no FFT, just pixel mapping from cached data.
  */
 export function drawSpec(track: Track): void {
+  if (!track.buffer) return;
   const { canvas, specData, specFrames, specHop, specH } = track;
   if (!canvas || !specData || !specFrames) return;
   const ctx = canvas.getContext('2d');
@@ -220,6 +231,7 @@ export function renderSpec(track: Track): void {
  * Shows amplitude envelope as min/max vertical bars per pixel column.
  */
 export function drawWaveform(track: Track): void {
+  if (!track.buffer) return;
   const canvas = track.waveformCanvas;
   if (!canvas) return;
 

@@ -8,6 +8,7 @@ export function initAudio(): { audioCtx: AudioContext; gainNode: GainNode } {
   gainNode = audioCtx.createGain();
   gainNode.connect(audioCtx.destination);
   gainNode.gain.value = 0.8;
+  (window as any).__audioCtx = audioCtx;
   return { audioCtx, gainNode };
 }
 
@@ -20,6 +21,7 @@ export function setVolume(v: number): void {
 }
 
 export function playSource(t: Track, from: number): void {
+  if (!t.buffer) return;
   if (t.playing) stopSource(t);
   t.offset = from;
   t.startTime = audioCtx.currentTime;

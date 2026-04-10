@@ -232,9 +232,10 @@ body {
   background: #444; pointer-events: none;
 }
 .playhead {
-  position: absolute; top: 0; width: 2px; height: 100%;
+  position: absolute; top: 0; left: 0; width: 2px; height: 100%;
   background: var(--playhead); pointer-events: none; z-index: 10;
   box-shadow: 0 0 6px var(--playhead-glow);
+  will-change: transform;
 }
 
 .time-ruler {
@@ -255,6 +256,19 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: #c0c0c0; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #aaa; }
+
+.drop-overlay {
+  position: fixed; inset: 0; z-index: 999;
+  background: rgba(59,130,246,0.12);
+  display: none; align-items: center; justify-content: center;
+  border: 3px dashed var(--accent); border-radius: 12px; margin: 12px;
+}
+.drop-overlay.visible { display: flex; }
+.drop-overlay-text {
+  font-size: 18px; color: var(--accent); background: var(--bg-card);
+  padding: 12px 24px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  font-weight: 600;
+}
 
 .loading-overlay {
   position: absolute; inset: 0; background: rgba(0,0,0,0.8);
@@ -315,5 +329,18 @@ body {
 }
 .btn-analyze-group:hover { background: #3a3a5a; border-color: #666; }
 .btn-analyze-group:disabled { opacity: 0.4; cursor: default; }
+
+.load-more-bar {
+  display: flex; justify-content: center; padding: 12px 0;
+}
+.load-more-btn {
+  background: var(--vscode-button-background, var(--accent));
+  color: var(--vscode-button-foreground, #fff);
+  border: 1px solid var(--accent);
+  padding: 6px 20px; border-radius: 4px; cursor: pointer;
+  font-size: 12px; font-weight: 600; font-family: inherit;
+  transition: all .12s;
+}
+.load-more-btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
 `;

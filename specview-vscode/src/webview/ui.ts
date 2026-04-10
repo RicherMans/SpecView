@@ -1,6 +1,6 @@
 import type { Track, Group, DecodedItem } from './types';
 import { SPEC_H, SPEC_H_DIFF, renderSpec, drawSpec, drawWaveform, getWaveformHeight } from './spectrogram';
-import { TAG_CSS, stripExt, extractTag, groupByBaseName, getParentFolderName } from './grouping';
+import { TAG_CSS, stripExt, extractTag, groupByBaseName, getParentFolderName, parseNativeSampleRate } from './grouping';
 import { playSource, stopSource, getPos, resumeAudio } from './audio';
 import { runAnalysis, runAnalysisGroup } from './analysis';
 import { fmt, fmtShort, esc } from './util';
@@ -28,6 +28,33 @@ let timeDisp: HTMLElement;
 let playIcon: HTMLElement;
 let playLabel: HTMLElement;
 
+// Lazy loading observer — decodes audio when card scrolls into view
+const lazyObserver = new IntersectionObserver(
+  (entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const card = entry.target as HTMLElement;
+      lazyObserver.unobserve(card);
+      // Find all tracks associated with this card and load them
+      const trackId = card.dataset.trackId;
+      const groupId = card.dataset.groupId;
+      if (trackId) {
+        const t = tracks.find(tr => tr.id === Number(trackId));
+        if (t && !t.loaded) loadTrack(t);
+      } else if (groupId) {
+        const g = groups.find(gr => gr.id === Number(groupId));
+        if (g) {
+          for (const tid of g.trackIds) {
+            const t = tracks.find(tr => tr.id === tid);
+            if (t && !t.loaded) loadTrack(t);
+          }
+        }
+      }
+    }
+  },
+  { rootMargin: '800px' }
+);
+
 export function getTracks(): Track[] { return tracks; }
 export function getGroups(): Group[] { return groups; }
 export function getActive(): Track | undefined {
@@ -41,16 +68,90 @@ export function getSiblings(t: Track): Track[] {
   return g.trackIds.map(id => tracks.find(tr => tr.id === id)).filter(Boolean) as Track[];
 }
 
-function mkTrack(name: string, buffer: AudioBuffer, nativeSR: number, filePath?: string): Track {
+async function loadTrack(t: Track): Promise<void> {
+  if (t.loaded || t._loading) return;
+  t._loading = true;
+
+  try {
+    const loading = t.el?.querySelector('.loading-overlay') as HTMLElement;
+    if (loading) {
+      loading.style.display = 'flex';
+      loading.innerHTML = '<div class="spinner"></div>Loading...';
+    }
+
+    // Lazy track: request data from extension host
+    if (!t.buffer && t.lazyUri) {
+      const requestFileData = (window as any).__requestFileData as (uri: string) => Promise<ArrayBuffer>;
+      if (!requestFileData) { t._loading = false; return; }
+      const raw = await requestFileData(t.lazyUri);
+      const nativeSR = parseNativeSampleRate(raw) || null;
+      const decoded = await (window as any).__audioCtx.decodeAudioData(raw.slice(0));
+      t.buffer = decoded;
+      t.nativeSR = nativeSR || decoded.sampleRate;
+    }
+
+    if (!t.buffer) { t._loading = false; return; }
+
+    t.loaded = true;
+    t.duration = t.buffer.duration;
+    t.sr = t.nativeSR || t.buffer.sampleRate;
+    t.nyquist = t.sr / 2;
+    t.renderSR = t.buffer.sampleRate;
+    t.viewEnd = t.duration;
+    // Trigger render
+    if (t._pendingRender) {
+      t._pendingRender();
+      t._pendingRender = null;
+    } else if (t.canvas && t.wrapper) {
+      const w = t.wrapper.clientWidth;
+      if (w > 0) {
+        t.canvas.width = w;
+        if (t.waveformCanvas) t.waveformCanvas.width = w;
+        renderSpec(t);
+        if (waveformVisible && t.waveformCanvas) drawWaveform(t);
+      }
+    }
+    if (loading && loading.parentNode) loading.remove();
+    // Update card info text
+    updateCardInfo(t);
+    updateRuler(t);
+  } catch (e) {
+    console.error('Failed to load track:', t.name, e);
+    const loading = t.el?.querySelector('.loading-overlay') as HTMLElement;
+    if (loading) {
+      loading.innerHTML = '<span style="color:#e74c3c">Load failed: ' + esc(String((e as Error).message || e)) + '</span>';
+    }
+  } finally {
+    t._loading = false;
+  }
+}
+
+function updateCardInfo(t: Track): void {
+  if (!t.el) return;
+  const info = t.el.querySelector('.card-info');
+  if (!info) return;
+  if (t.loaded) {
+    const ch = t.buffer.numberOfChannels === 1 ? 'Mono' : t.buffer.numberOfChannels === 2 ? 'Stereo' : t.buffer.numberOfChannels + 'ch';
+    info.textContent = ch + ' ' + (t.sr / 1000).toFixed(1) + 'kHz | ' + fmt(t.duration);
+  }
+  // Update diff lane info too
+  const laneInfo = t.laneLabel?.querySelector('.card-info');
+  if (laneInfo && t.loaded) {
+    laneInfo.textContent = (t.sr / 1000).toFixed(1) + 'kHz';
+  }
+}
+
+function mkTrack(name: string, buffer: AudioBuffer | null, nativeSR: number, filePath?: string, lazyUri?: string): Track {
   const id = nextId++;
-  const dur = buffer.duration;
-  const displaySR = nativeSR || buffer.sampleRate;
+  const loaded = !!buffer;
+  const dur = loaded ? buffer!.duration : 0;
+  const displaySR = loaded ? (nativeSR || buffer!.sampleRate) : 0;
   const ny = displaySR / 2;
   return {
-    id, name, buffer, duration: dur, nyquist: ny, sr: displaySR, nativeSR: displaySR, renderSR: buffer.sampleRate,
+    id, name, buffer: buffer as AudioBuffer, loaded, duration: dur, nyquist: ny, sr: displaySR, nativeSR: displaySR, renderSR: loaded ? buffer!.sampleRate : 0,
     canvas: null, wrapper: null, ph: null, laneLabel: null, analysisStrip: null, analyzeBtn: null, rulerEl: null,
     playing: false, startTime: 0, offset: 0, source: null,
-    groupId: null, el: null, analysisResults: null, filePath,
+    groupId: null, el: null, analysisResults: null, filePath, lazyUri,
     viewStart: 0, viewEnd: dur,
     specData: null, specFrames: 0, specHop: 0, specH: 0, specMaxBin: 0, specGlobalPeak: -Infinity,
     waveformCanvas: null, waveformWrapper: null, waveformRow: null, waveformPh: null,
@@ -58,6 +159,7 @@ function mkTrack(name: string, buffer: AudioBuffer, nativeSR: number, filePath?:
 }
 
 function addFreqLabels(el: HTMLElement, ny: number): void {
+  if (!ny || ny <= 0) return; // skip for unloaded tracks
   const allTicks = [200, 500, 1000, 2000, 4000, 8000, 12000, 16000, 20000, 24000];
   const h = parseInt(el.style.height) || 220;
   const MIN_GAP = 14;
@@ -136,7 +238,7 @@ function buildSpecBody(track: Track, h: number): HTMLElement {
     '<div class="waveform-labels" style="height:' + wfH + 'px"></div>' +
     '<div class="waveform-wrapper" style="flex:1;position:relative;overflow:hidden;cursor:crosshair">' +
     '<canvas height="' + wfH + '"></canvas>' +
-    '<div class="waveform-playhead" style="position:absolute;top:0;width:2px;height:100%;background:#ff3333;pointer-events:none;z-index:10;left:0"></div>' +
+    '<div class="waveform-playhead" style="position:absolute;top:0;left:0;width:2px;height:100%;background:#ff3333;pointer-events:none;z-index:10;will-change:transform"></div>' +
     '</div>';
   el.appendChild(waveRow);
   track.waveformRow = waveRow;
@@ -257,24 +359,33 @@ function buildSpecBody(track: Track, h: number): HTMLElement {
   document.addEventListener('mousemove', onMouseMove);
   document.addEventListener('mouseup', onMouseUp);
 
-  track._pendingRender = () => {
-    const w = track.wrapper!.clientWidth;
-    if (w > 0) {
-      track.canvas!.width = w;
-      if (track.waveformCanvas) {
-        track.waveformCanvas.width = w; // Use same width as spectrogram for time alignment
-      }
-      setTimeout(() => {
-        renderSpec(track);
-        if (waveformVisible && track.waveformCanvas) {
-          drawWaveform(track);
+  if (track.loaded) {
+    track._pendingRender = () => {
+      const w = track.wrapper!.clientWidth;
+      if (w > 0) {
+        track.canvas!.width = w;
+        if (track.waveformCanvas) {
+          track.waveformCanvas.width = w;
         }
-        if (loading.parentNode) loading.remove();
-      }, 0);
-    } else {
-      if (loading.parentNode) loading.remove();
+        setTimeout(() => {
+          renderSpec(track);
+          if (waveformVisible && track.waveformCanvas) {
+            drawWaveform(track);
+          }
+          if (loading && loading.parentNode) loading.remove();
+        }, 0);
+      } else {
+        if (loading && loading.parentNode) loading.remove();
+      }
+    };
+  } else {
+    // Lazy track: show placeholder
+    const loadingEl = el.querySelector('.loading-overlay') as HTMLElement;
+    if (loadingEl) {
+      loadingEl.innerHTML = '<span style="color:#666;font-size:11px">Waiting to load…</span>';
     }
-  };
+    track._pendingRender = null;
+  }
   return el;
 }
 
@@ -464,8 +575,7 @@ export function setWaveformVisible(visible: boolean): void {
     if (t.waveformRow) {
       t.waveformRow.style.display = visible ? 'flex' : 'none';
     }
-    if (visible && t.waveformCanvas) {
-      // Resize waveform canvas to match spectrogram width for time alignment
+    if (visible && t.waveformCanvas && t.loaded) {
       const w = t.wrapper!.clientWidth;
       if (w > 0) t.waveformCanvas.width = w;
       drawWaveform(t);
@@ -480,6 +590,7 @@ export function isWaveformVisible(): boolean {
 // ========== PLAYBACK + SEEK ==========
 
 function selectAndSeek(track: Track, time: number): void {
+  if (!track.buffer) { setActive(track.id); return; }
   const was = track.playing;
   stopAllSources();
   setActive(track.id);
@@ -517,7 +628,7 @@ export function updateLaneHighlights(): void {
 
 export function updatePlayheads(): void {
   for (const t of tracks) {
-    if (!t.canvas || !t.ph) continue;
+    if (!t.canvas || !t.ph || !t.loaded) continue;
     const pos = getPos(t);
     const span = t.viewEnd - t.viewStart;
     if (pos < t.viewStart || pos > t.viewEnd) {
@@ -525,11 +636,13 @@ export function updatePlayheads(): void {
       if (t.waveformPh) t.waveformPh.style.display = 'none';
     } else {
       t.ph.style.display = '';
-      const pct = ((pos - t.viewStart) / span) * 100;
-      t.ph.style.left = pct + '%';
+      const frac = (pos - t.viewStart) / span;
+      const px = frac * t.wrapper!.clientWidth;
+      t.ph.style.transform = 'translateX(' + px + 'px)';
       if (t.waveformPh) {
         t.waveformPh.style.display = '';
-        t.waveformPh.style.left = pct + '%';
+        const wfPx = t.waveformWrapper ? frac * (t.waveformWrapper as HTMLElement).clientWidth : px;
+        t.waveformPh.style.transform = 'translateX(' + wfPx + 'px)';
       }
     }
   }
@@ -569,9 +682,15 @@ export function pauseAll(): void {
   updateTimeDisplay();
 }
 
-export function playActive(): void {
+export async function playActive(): Promise<void> {
   const t = getActive();
   if (!t) return;
+  if (!t.buffer) {
+    await loadTrack(t);
+    if (!t.buffer) return;
+    updateCardInfo(t);
+    refreshUI();
+  }
   resumeAudio();
   stopAllSources();
   if (t.offset >= t.duration - 0.01) t.offset = 0;
@@ -594,7 +713,7 @@ export function togglePlay(): void {
   }
 }
 
-export function switchLane(): void {
+export async function switchLane(): Promise<void> {
   const t = getActive();
   if (!t || t.groupId == null) return;
   const g = groups.find(g => g.id === t.groupId);
@@ -604,6 +723,13 @@ export function switchLane(): void {
   const nextIdx = (idx + 1) % g.trackIds.length;
   const nextTrack = tracks.find(tr => tr.id === g.trackIds[nextIdx]);
   if (!nextTrack) return;
+
+  // Auto-load lazy track before switching
+  if (!nextTrack.buffer) {
+    await loadTrack(nextTrack);
+    if (!nextTrack.buffer) return;
+    updateCardInfo(nextTrack);
+  }
 
   const pos = getPos(t);
   if (t.playing) stopSource(t);
@@ -715,7 +841,9 @@ function placeCardAtPosition(placeholder: HTMLElement): void {
 
 function createStandalone(name: string, buffer: AudioBuffer, nativeSR: number, filePath?: string): void {
   const t = mkTrack(name, buffer, nativeSR, filePath);
-  const chL = buffer.numberOfChannels === 1 ? 'Mono' : buffer.numberOfChannels === 2 ? 'Stereo' : buffer.numberOfChannels + 'ch';
+  const infoText = t.loaded
+    ? (function(){ const b = buffer; const ch = b.numberOfChannels === 1 ? 'Mono' : b.numberOfChannels === 2 ? 'Stereo' : b.numberOfChannels + 'ch'; return ch + ' ' + (t.sr / 1000).toFixed(1) + 'kHz | ' + fmt(t.duration); })()
+    : '…';
   const card = document.createElement('div');
   card.className = 'card';
   card.dataset.trackId = String(t.id);
@@ -724,7 +852,7 @@ function createStandalone(name: string, buffer: AudioBuffer, nativeSR: number, f
   hdr.innerHTML =
     '<span class="card-title" title="' + esc(name) + '">' + esc(name) + '</span>' +
     '<button class="btn-analyze" title="Run audio classification">Analyze</button>' +
-    '<span class="card-info">' + chL + ' ' + (t.sr / 1000).toFixed(1) + 'kHz | ' + fmt(t.duration) + '</span>' +
+    '<span class="card-info">' + esc(infoText) + '</span>' +
     '<button class="card-remove" title="Remove">&times;</button>';
   hdr.addEventListener('click', () => setActive(t.id));
   hdr.querySelector('.card-remove')!.addEventListener('click', e => { e.stopPropagation(); removeTrack(t.id); });
@@ -737,13 +865,19 @@ function createStandalone(name: string, buffer: AudioBuffer, nativeSR: number, f
   t.el = card;
   tracks.push(t);
   if (!activeTrackId) activeTrackId = t.id;
-  requestAnimationFrame(() => { if (t._pendingRender) { t._pendingRender(); t._pendingRender = null; } });
+
+  if (t.loaded) {
+    requestAnimationFrame(() => { if (t._pendingRender) { t._pendingRender(); t._pendingRender = null; } });
+  } else {
+    lazyObserver.observe(card);
+  }
 }
 
 function createDiffGroup(baseName: string, items: DecodedItem[]): void {
   const gid = nextGrpId++;
   const grpTracks: Track[] = [];
-  const maxDur = Math.max(...items.map(i => i.buffer.duration));
+  const anyLoaded = items.some(i => !!i.buffer);
+  const maxDur = anyLoaded ? Math.max(...items.filter(i => i.buffer).map(i => i.buffer.duration)) : 0;
   const card = document.createElement('div');
   card.className = 'card';
   card.dataset.groupId = String(gid);
@@ -755,7 +889,7 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): void {
     '<span class="card-title" title="' + esc(display) + '">' + esc(display) + '</span>' +
     '<span class="diff-badge">DIFF ' + items.length + '</span>' +
     '<button class="btn-analyze-group" title="Analyze all tracks in this group">Analyze Group</button>' +
-    '<span class="card-info">' + fmt(maxDur) + '</span>' +
+    '<span class="card-info">' + (anyLoaded ? fmt(maxDur) : '…') + '</span>' +
     '<button class="card-remove" title="Remove group">&times;</button>';
   hdr.addEventListener('click', () => { if (grpTracks.length) setActive(grpTracks[0].id); });
   hdr.querySelector('.card-remove')!.addEventListener('click', e => { e.stopPropagation(); removeDiffGroup(gid); });
@@ -775,11 +909,12 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): void {
     lbl.className = 'diff-lane-label';
     const tagText = item.suffix ? item.suffix : ('Track ' + (idx + 1));
     const tagCls = TAG_CSS[idx % TAG_CSS.length];
+    const srText = t.loaded ? (t.sr / 1000).toFixed(1) + 'kHz' : '…';
     lbl.innerHTML =
       '<span class="diff-lane-tag ' + tagCls + '">' + esc(tagText) + '</span>' +
       '<span class="diff-lane-name">' + esc(item.name) + '</span>' +
       '<button class="btn-analyze" title="Run audio classification">Analyze</button>' +
-      '<span class="card-info">' + (t.sr / 1000).toFixed(1) + 'kHz</span>' +
+      '<span class="card-info">' + esc(srText) + '</span>' +
       '<span class="diff-lane-playing"></span>' +
       '<button class="lane-remove" title="Remove this track">&times;</button>';
     lbl.addEventListener('click', () => { setActive(t.id); updateLaneHighlights(); });
@@ -809,11 +944,17 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): void {
   tracksBox.appendChild(card);
   groups.push({ id: gid, baseName, trackIds: grpTracks.map(t => t.id), el: card });
   updateLaneHighlights();
-  requestAnimationFrame(() => {
-    for (const t of grpTracks) {
-      if (t._pendingRender) { t._pendingRender(); t._pendingRender = null; }
-    }
-  });
+
+  if (grpTracks.some(t => t.loaded)) {
+    requestAnimationFrame(() => {
+      for (const t of grpTracks) {
+        if (t._pendingRender) { t._pendingRender(); t._pendingRender = null; }
+      }
+    });
+  }
+  if (grpTracks.some(t => !t.loaded)) {
+    lazyObserver.observe(card);
+  }
 }
 
 function addToDiffGroup(grp: Group, newItem: DecodedItem): void {
@@ -832,16 +973,21 @@ function addToDiffGroup(grp: Group, newItem: DecodedItem): void {
   placeCardAtPosition(ph);
 }
 
+function notifyRemoveFromLoaded(t: Track): void {
+  if (t.filePath) {
+    (window as any).__vscodePostMessage({ type: 'removeFromLoaded', filePath: t.filePath });
+  } else if (t.lazyUri && !t.lazyUri.startsWith('tar:')) {
+    (window as any).__vscodePostMessage({ type: 'removeFromLoaded', uri: t.lazyUri });
+  }
+}
+
 function removeTrack(id: number): void {
   const i = tracks.findIndex(t => t.id === id);
   if (i < 0) return;
   const t = tracks[i];
   if (t.playing) stopSource(t);
   if (t.groupId != null) { removeDiffGroup(t.groupId); return; }
-  // Notify extension host to allow re-adding this file
-  if (t.filePath) {
-    (window as any).__vscodePostMessage({ type: 'removeFromLoaded', filePath: t.filePath });
-  }
+  notifyRemoveFromLoaded(t);
   if (t.el) t.el.remove();
   tracks.splice(i, 1);
   if (activeTrackId === id) activeTrackId = tracks.length ? tracks[0].id : null;
@@ -855,10 +1001,7 @@ function removeDiffGroup(gid: number): void {
   for (const tid of grp.trackIds) {
     const ti = tracks.findIndex(t => t.id === tid);
     if (ti >= 0) {
-      // Notify extension host to allow re-adding this file
-      if (tracks[ti].filePath) {
-        (window as any).__vscodePostMessage({ type: 'removeFromLoaded', filePath: tracks[ti].filePath });
-      }
+      notifyRemoveFromLoaded(tracks[ti]);
       if (tracks[ti].playing) stopSource(tracks[ti]);
       tracks.splice(ti, 1);
     }
@@ -875,10 +1018,7 @@ function deleteTrackFromGroup(trackId: number): void {
   if (!t) return;
   if (t.playing) stopSource(t);
 
-  // Notify extension host to allow re-adding this file
-  if (t.filePath) {
-    (window as any).__vscodePostMessage({ type: 'removeFromLoaded', filePath: t.filePath });
-  }
+  notifyRemoveFromLoaded(t);
 
   if (t.groupId == null) {
     // Standalone track — just remove it
@@ -944,22 +1084,11 @@ export function deleteActiveTrack(): void {
   deleteTrackFromGroup(t.id);
 }
 
-export function clearAll(): void {
-  stopAll();
-  tracks.forEach(t => { if (t.el) t.el.remove(); });
-  groups.forEach(g => { if (g.el) g.el.remove(); });
-  tracks = [];
-  groups = [];
-  activeTrackId = null;
-  tracksBox.innerHTML = '';
-  refreshUI();
-}
-
 export function refreshUI(): void {
   const has = tracks.length > 0;
   dropZone.className = has ? 'compact' : 'empty';
   dropZone.querySelector('.dz-text')!.textContent =
-    has ? '+ Click to add more audio files' : 'Click to add audio files';
+    has ? '+ Click to add more audio files or archives' : 'Drop audio files or .tar/.tar.gz archives here, or click to browse';
   btnPlay.disabled = !has;
   btnStop.disabled = !has;
   btnZoomIn.disabled = !has;
@@ -1070,6 +1199,75 @@ export function handleFiles(items: DecodedItem[]): void {
       }
     }
   }
+  refreshUI();
+}
+
+/**
+ * Create lazy placeholder tracks from file URIs (sent by extension host for on-demand loading).
+ * Tracks are created in batches (100 at a time) with a "Load More" button.
+ */
+const LOAD_MORE_BATCH = 100;
+let fileURIsQueue: { name: string; uri: string }[] = [];
+let loadMoreBtn: HTMLElement | null = null;
+
+function createLazyCard(f: { name: string; uri: string }): void {
+  const t = mkTrack(f.name, null, 0, undefined, f.uri);
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.dataset.trackId = String(t.id);
+  const hdr = document.createElement('div');
+  hdr.className = 'card-header';
+  hdr.innerHTML =
+    '<span class="card-title" title="' + esc(f.name) + '">' + esc(f.name) + '</span>' +
+    '<button class="btn-analyze" title="Run audio classification" disabled>Analyze</button>' +
+    '<span class="card-info">\u2026</span>' +
+    '<button class="card-remove" title="Remove">&times;</button>';
+  hdr.addEventListener('click', () => setActive(t.id));
+  hdr.querySelector('.card-remove')!.addEventListener('click', e => { e.stopPropagation(); removeTrack(t.id); });
+  t.analyzeBtn = hdr.querySelector('.btn-analyze');
+  card.appendChild(hdr);
+  card.appendChild(buildSpecBody(t, SPEC_H));
+  card.appendChild(buildRuler(t));
+  tracksBox.appendChild(card);
+  t.el = card;
+  tracks.push(t);
+  if (!activeTrackId) activeTrackId = t.id;
+  lazyObserver.observe(card);
+}
+
+export function handleFileURIs(files: { name: string; uri: string }[]): void {
+  fileURIsQueue = fileURIsQueue.concat(files);
+  loadMoreFileURIs();
+}
+
+export function loadMoreFileURIs(): void {
+  const batch = fileURIsQueue.splice(0, LOAD_MORE_BATCH);
+  for (const f of batch) createLazyCard(f);
+  updateLoadMoreBtn();
+  refreshUI();
+}
+
+function updateLoadMoreBtn(): void {
+  if (loadMoreBtn) { loadMoreBtn.remove(); loadMoreBtn = null; }
+  if (fileURIsQueue.length > 0) {
+    loadMoreBtn = document.createElement('div');
+    loadMoreBtn.className = 'load-more-bar';
+    loadMoreBtn.innerHTML = '<button class="btn load-more-btn">Load more (' + fileURIsQueue.length + ' remaining)</button>';
+    loadMoreBtn.querySelector('.load-more-btn')!.addEventListener('click', loadMoreFileURIs);
+    tracksBox.appendChild(loadMoreBtn);
+  }
+}
+
+export function clearAll(): void {
+  stopAll();
+  tracks.forEach(t => { if (t.el) t.el.remove(); });
+  groups.forEach(g => { if (g.el) g.el.remove(); });
+  tracks = [];
+  groups = [];
+  activeTrackId = null;
+  fileURIsQueue = [];
+  if (loadMoreBtn) { loadMoreBtn.remove(); loadMoreBtn = null; }
+  tracksBox.innerHTML = '';
   refreshUI();
 }
 

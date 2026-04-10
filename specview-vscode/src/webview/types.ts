@@ -2,6 +2,7 @@ export interface Track {
   id: number;
   name: string;
   buffer: AudioBuffer;
+  loaded: boolean;             // false when track is a lazy placeholder
   duration: number;
   nyquist: number;
   sr: number;
@@ -22,6 +23,8 @@ export interface Track {
   el: HTMLElement | null;
   analysisResults: AnalysisSpan[] | null;
   filePath?: string;   // full path, for same-name different-directory grouping
+  lazyUri?: string;    // webview-accessible URI for lazy-loaded tracks
+  _loading?: boolean;  // prevents concurrent load requests
   _pendingRender?: (() => void) | null;
   // Zoom state
   viewStart: number;   // visible region start (seconds), default 0

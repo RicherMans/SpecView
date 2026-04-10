@@ -2,7 +2,7 @@
   "name": "specview",
   "displayName": "SpecView - Spectrogram Viewer",
   "description": "Audio spectrogram viewer with playback, auto-grouping for A/B comparison, and ML-powered audio classification",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "sunxingwei",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -36,7 +36,8 @@
   "activationEvents": [
     "onCustomEditor:specview.editor",
     "onCommand:specview.openFile",
-    "onCommand:specview.openMultiple"
+    "onCommand:specview.openMultiple",
+    "onCommand:specview.openFolder"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -46,7 +47,7 @@
         "displayName": "SpecView Spectrogram",
         "selector": [
           {
-            "filenamePattern": "*.{wav,mp3,ogg,flac,m4a,aac,webm,wma,aiff,opus}"
+            "filenamePattern": "*.{wav,mp3,ogg,flac,m4a,aac,webm,wma,aiff,opus,tar,tar.gz,tgz}"
           }
         ],
         "priority": "default"
@@ -60,13 +61,22 @@
       {
         "command": "specview.openMultiple",
         "title": "Open with SpecView"
+      },
+      {
+        "command": "specview.openFolder",
+        "title": "Open folder with SpecView"
       }
     ],
     "menus": {
       "explorer/context": [
         {
           "command": "specview.openMultiple",
-          "when": "resourceExtname =~ /\\.(wav|mp3|ogg|flac|m4a|aac|webm|wma|aiff|opus)$/i",
+          "when": "resourceExtname =~ /\\.(wav|mp3|ogg|flac|m4a|aac|webm|wma|aiff|opus|tar|gz|tgz)$/i",
+          "group": "navigation"
+        },
+        {
+          "command": "specview.openFolder",
+          "when": "explorerResourceIsFolder",
           "group": "navigation"
         }
       ]
@@ -74,7 +84,7 @@
     "editorAssociations": [
       {
         "viewType": "specview.editor",
-        "filenamePattern": "*.{wav,mp3,ogg,flac,m4a,aac,webm,wma,aiff,opus}"
+        "filenamePattern": "*.{wav,mp3,ogg,flac,m4a,aac,webm,wma,aiff,opus,tar,tar.gz,tgz}"
       }
     ]
   },
