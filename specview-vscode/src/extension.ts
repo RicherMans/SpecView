@@ -43,6 +43,10 @@ export function activate(context: vscode.ExtensionContext) {
       let files: vscode.Uri[];
       if (allUris && allUris.length > 0) {
         files = allUris;
+        // Ensure the right-clicked URI is included (it may not be in the selection)
+        if (selectedUri && !allUris.some(u => u.fsPath === selectedUri.fsPath)) {
+          files = [selectedUri, ...allUris];
+        }
       } else if (selectedUri) {
         files = [selectedUri];
       } else {

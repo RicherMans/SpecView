@@ -144,9 +144,10 @@ export class SpecViewEditorProvider implements vscode.CustomReadonlyEditorProvid
   private static setupWebview(
     webviewPanel: vscode.WebviewPanel,
     context: vscode.ExtensionContext,
-    onReady: (panel: vscode.WebviewPanel) => Promise<void>
+    onReady: (panel: vscode.WebviewPanel) => Promise<void>,
+    resetState = true
   ): void {
-    this.loadedFiles.clear();
+    if (resetState) this.loadedFiles.clear();
 
     webviewPanel.webview.options = {
       enableScripts: true,
