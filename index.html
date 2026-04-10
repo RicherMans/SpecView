@@ -334,6 +334,13 @@ body {
 }
 .btn-analyze-group:hover { background: #3a3a5a; border-color: #666; }
 .btn-analyze-group:disabled { opacity: 0.4; cursor: default; }
+.load-more-bar { display: flex; justify-content: center; padding: 12px 0; }
+.load-more-btn {
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  padding: 6px 20px; border-radius: 4px; cursor: pointer;
+  font-size: 12px; font-weight: 600; font-family: inherit; transition: all .12s;
+}
+.load-more-btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 /* ===== FULL-PAGE DROP OVERLAY ===== */
 .drop-overlay {
   position: fixed; inset: 0; z-index: 999;
@@ -480,52 +487,65 @@ gainNode.gain.value = 0.8;
 
 let tracks = [], groups = [], nextId = 1, nextGrpId = 1;
 let activeTrackId = null, rafId = null;
+let fileURIsQueue = [], loadMoreBtn = null;
 
 volSlider.addEventListener('input', () => { gainNode.gain.value = volSlider.value / 100; });
 
 /* ========================================================================
- *  LAZY LOADING — IntersectionObserver
+ *  LAZY LOADING — IntersectionObserver + concurrency-limited queue
  *  Cards with unloaded tracks are observed. When they enter the viewport
- *  (+ 800px margin), their audio is decoded and spectrograms rendered.
+ *  (+ 800px margin), their tracks are enqueued for decoding (max 3 concurrent).
  * ======================================================================== */
+const MAX_CONCURRENT_LOADS = 3;
+let activeLoads = 0;
+const loadQueue = [];
+
+function isTrackAlive(t) { return tracks.some(tr => tr.id === t.id); }
+
+function enqueueLoad(t) {
+  if (t.loaded || t._loading) return;
+  if (!loadQueue.some(q => q.id === t.id)) loadQueue.push(t);
+  drainLoadQueue();
+}
+
+function drainLoadQueue() {
+  while (activeLoads < MAX_CONCURRENT_LOADS && loadQueue.length > 0) {
+    const t = loadQueue.shift();
+    if (t.loaded || t._loading || !isTrackAlive(t)) continue;
+    activeLoads++;
+    loadTrack(t).finally(() => {
+      activeLoads--;
+      drainLoadQueue();
+    });
+  }
+}
+
 const lazyObserver = new IntersectionObserver(entries => {
   for (const entry of entries) {
-    if (entry.isIntersecting) loadCard(entry.target);
+    if (!entry.isIntersecting) continue;
+    const cardEl = entry.target;
+    lazyObserver.unobserve(cardEl);
+    const cardTracks = tracks.filter(t => t.el === cardEl && !t.loaded);
+    for (const t of cardTracks) enqueueLoad(t);
   }
 }, { root: tracksBox, rootMargin: '800px 0px' });
 
-/* Decode + render all unloaded tracks belonging to a card element */
-async function loadCard(cardEl) {
-  lazyObserver.unobserve(cardEl);
-
-  /* Gather all unloaded tracks for this card */
-  const cardTracks = tracks.filter(t => t.el === cardEl && !t.loaded);
-  if (!cardTracks.length) return;
-
-  /* Decode each track sequentially (avoid flooding decodeAudioData) */
-  for (const t of cardTracks) {
-    await loadTrack(t);
-  }
-
-  /* Update card header info (duration, sample rate) */
-  updateCardInfo(cardEl);
-  refreshUI();
-}
-
 /* Decode a single lazy track: read file → parse SR → decode → render */
 async function loadTrack(t) {
-  if (t.loaded || !t.file) return;
+  if (t.loaded || t._loading || !t.file) return;
+  t._loading = true;
 
-  /* Show spinner on this track's spectrogram */
   const loadingEl = t.wrapper ? t.wrapper.querySelector('.loading-overlay') : null;
   if (loadingEl) loadingEl.innerHTML = '<div class="spinner"></div>Decoding…';
 
   try {
     const arrBuf = await t.file.arrayBuffer();
+    if (!isTrackAlive(t)) return;  /* track removed during async gap */
+
     const nativeSR = parseNativeSampleRate(arrBuf) || null;
     const decoded = await audioCtx.decodeAudioData(arrBuf.slice(0));
+    if (!isTrackAlive(t)) return;  /* track removed during async gap */
 
-    /* Populate track fields */
     t.buffer   = decoded;
     t.loaded   = true;
     t.duration = decoded.duration;
@@ -534,15 +554,13 @@ async function loadTrack(t) {
     t.renderSR = decoded.sampleRate;
     t.nyquist  = t.sr / 2;
     t.viewEnd  = decoded.duration;
-    t.file     = null;          /* release File reference to free memory */
+    t.file     = null;
 
-    /* Render spectrogram + waveform */
     if (t.wrapper && t.canvas) {
       const w = t.wrapper.clientWidth;
       if (w > 0) {
         t.canvas.width = w;
         if (t.waveformCanvas) t.waveformCanvas.width = w;
-        /* Re-populate freq labels now that we know nyquist */
         const freqEl = t.wrapper.parentElement
           ? t.wrapper.parentElement.querySelector('.freq-labels')
           : null;
@@ -552,11 +570,13 @@ async function loadTrack(t) {
       }
     }
     if (loadingEl && loadingEl.parentNode) loadingEl.remove();
-    /* Update ruler */
     updateRuler(t);
+    updateCardInfo(t.el);
   } catch(e) {
     console.error('Lazy decode error:', t.name, e);
     if (loadingEl) loadingEl.innerHTML = '<span style="color:#e74c3c;font-size:10px">Decode failed</span>';
+  } finally {
+    t._loading = false;
   }
 }
 
@@ -645,15 +665,17 @@ async function extractAudioFromTar(arrayBuffer, fileName) {
     /* Skip directories and empty files */
     if (!entry.name || entry.size === 0 || entry.type === '5') continue;
 
-    /* Use basename only (strip directory path) */
+    /* Use basename for display, keep full path for grouping */
     const baseName = entry.name.split('/').pop();
     if (!baseName || !AUDIO_RE.test(baseName)) continue;
 
-    /* Build a File-like object that the existing pipeline can consume */
+    /* Build a File-like object that the existing pipeline can consume.
+       Store the full tar-internal path as _tarPath for same-name grouping. */
     const blob = entry.blob || new Blob([entry.buffer]);
     const file = new File([blob], baseName, {
       type: blob.type || guessAudioMime(baseName)
     });
+    file._tarPath = entry.name;  /* e.g. "exp1/audio.wav" */
     audioFiles.push(file);
   }
 
@@ -771,27 +793,63 @@ async function handleFiles(fileList) {
   }
   if (!audioFiles.length) return;
 
+  const DECODE_CONCURRENCY = 3;
   if (audioFiles.length < LAZY_THRESH) {
-    /* ── EAGER PATH: decode all, then create cards ── */
-    const promises = audioFiles.map(f =>
-      f.arrayBuffer().then(arrBuf => {
-        const nativeSR = parseNativeSampleRate(arrBuf) || null;
+    /* ── EAGER PATH: decode in chunks of 3 to limit memory pressure ── */
+    const batch = [];
+    for (let i = 0; i < audioFiles.length; i += DECODE_CONCURRENCY) {
+      const chunk = audioFiles.slice(i, i + DECODE_CONCURRENCY);
+      const promises = chunk.map(f =>
+        f.arrayBuffer().then(arrBuf => {
+          const nativeSR = parseNativeSampleRate(arrBuf) || null;
         return audioCtx.decodeAudioData(arrBuf.slice(0)).then(decoded => ({
-          name: f.name, buffer: decoded, nativeSR: nativeSR || decoded.sampleRate
+          name: f.name, buffer: decoded, nativeSR: nativeSR || decoded.sampleRate, filePath: f._tarPath || null
         }));
-      }).catch(e => { console.error('Decode error:', f.name, e); return null; })
-    );
-    const batch = (await Promise.all(promises)).filter(Boolean);
+        }).catch(e => { console.error('Decode error:', f.name, e); return null; })
+      );
+      const results = (await Promise.all(promises)).filter(Boolean);
+      batch.push(...results);
+    }
     if (!batch.length) return;
     const grouped = groupByBaseName(batch);
     applyGrouped(grouped);
     refreshUI();
   } else {
-    /* ── LAZY PATH: create placeholder cards, decode on scroll ── */
-    const items = audioFiles.map(f => ({ name: f.name, buffer: null, nativeSR: null, file: f }));
+    /* ── LAZY PATH: create placeholder cards in batches, decode on scroll ── */
+    const LOAD_MORE_BATCH = 100;
+    const items = audioFiles.map(f => ({ name: f.name, buffer: null, nativeSR: null, file: f, filePath: f._tarPath || null }));
     const grouped = groupByBaseName(items);
-    applyGrouped(grouped);
+
+    /* Flatten grouped items for batched creation */
+    const allGrouped = grouped;
+    if (allGrouped.length <= LOAD_MORE_BATCH) {
+      applyGrouped(allGrouped);
+    } else {
+      const firstBatch = allGrouped.slice(0, LOAD_MORE_BATCH);
+      applyGrouped(firstBatch);
+      fileURIsQueue = allGrouped.slice(LOAD_MORE_BATCH);
+      updateLoadMoreBtn();
+    }
     refreshUI();
+  }
+}
+
+function loadMoreLazyCards() {
+  const LOAD_MORE_BATCH = 100;
+  const batch = fileURIsQueue.splice(0, LOAD_MORE_BATCH);
+  if (batch.length > 0) applyGrouped(batch);
+  updateLoadMoreBtn();
+  refreshUI();
+}
+
+function updateLoadMoreBtn() {
+  if (loadMoreBtn) { loadMoreBtn.remove(); loadMoreBtn = null; }
+  if (fileURIsQueue.length > 0) {
+    loadMoreBtn = document.createElement('div');
+    loadMoreBtn.className = 'load-more-bar';
+    loadMoreBtn.innerHTML = '<button class="btn load-more-btn">Load more (' + fileURIsQueue.length + ' groups remaining)</button>';
+    loadMoreBtn.querySelector('.load-more-btn').addEventListener('click', loadMoreLazyCards);
+    tracksBox.appendChild(loadMoreBtn);
   }
 }
 
@@ -807,7 +865,7 @@ function applyGrouped(grouped) {
         const oldTag = extractTag(stripExt(oldTrack.name)).tag || oldTrack.name;
         ph = insertPlaceholderBefore(oldTrack.el);
         removeTrackQuietly(oldTrack.id);
-        grp.items.push({ name: oldTrack.name, buffer: oldTrack.buffer, file: oldTrack.file, suffix: oldTag, nativeSR: oldTrack.nativeSR });
+        grp.items.push({ name: oldTrack.name, buffer: oldTrack.buffer, file: oldTrack.file, suffix: oldTag, nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath });
       }
       createDiffGroup(grp.baseName, grp.items);
       if (ph) placeCardAtPosition(ph);
@@ -822,7 +880,7 @@ function applyGrouped(grouped) {
         const ph = insertPlaceholderBefore(oldTrack.el);
         removeTrackQuietly(oldTrack.id);
         createDiffGroup(stem, [
-          { name: oldTrack.name, buffer: oldTrack.buffer, file: oldTrack.file, suffix: oldTag, nativeSR: oldTrack.nativeSR },
+          { name: oldTrack.name, buffer: oldTrack.buffer, file: oldTrack.file, suffix: oldTag, nativeSR: oldTrack.nativeSR, filePath: oldTrack.filePath },
           { ...newItem, suffix: tag }
         ]);
         placeCardAtPosition(ph);
@@ -831,7 +889,7 @@ function applyGrouped(grouped) {
         if (existingGroup && tag) {
           addToDiffGroup(existingGroup, { ...newItem, suffix: tag });
         } else {
-          createStandalone(newItem.name, newItem.buffer, newItem.nativeSR, newItem.file);
+          createStandalone(newItem.name, newItem.buffer, newItem.nativeSR, newItem.file, newItem.filePath);
         }
       }
     }
@@ -887,8 +945,9 @@ function addToDiffGroup(grp, newItem) {
   const existingItems = grp.trackIds.map(id => {
     const t = tracks.find(tr => tr.id === id);
     if (!t) return null;
-    const tag = extractTag(stripExt(t.name)).tag || t.name;
-    return { name: t.name, buffer: t.buffer, file: t.file, suffix: tag, nativeSR: t.nativeSR };
+    const tag = extractTag(stripExt(t.name)).tag;
+    const suffix = tag || (t.filePath ? getParentFolderName(t.filePath) : t.name);
+    return { name: t.name, buffer: t.buffer, file: t.file, suffix, nativeSR: t.nativeSR, filePath: t.filePath };
   }).filter(Boolean);
 
   const ph = insertPlaceholderBefore(grp.el);
@@ -1203,7 +1262,7 @@ function setWaveformVisible(visible) {
 /* ========================================================================
  *  TRACK HELPERS
  * ======================================================================== */
-function mkTrack(name, buffer, nativeSR, file) {
+function mkTrack(name, buffer, nativeSR, file, filePath) {
   const id = nextId++;
   const loaded = !!buffer;
   const dur       = loaded ? buffer.duration     : 0;
@@ -1211,7 +1270,7 @@ function mkTrack(name, buffer, nativeSR, file) {
   const renderSR  = loaded ? buffer.sampleRate   : 0;
   const ny        = displaySR / 2;
   return {
-    id, name, buffer, file: file || null, loaded,
+    id, name, buffer, file: file || null, filePath: filePath || null, loaded,
     duration:dur, nyquist:ny, sr:displaySR, nativeSR:displaySR, renderSR,
     canvas:null, wrapper:null, ph:null, laneLabel:null, analysisStrip:null, analyzeBtn:null, rulerEl:null,
     playing:false, startTime:0, offset:0, source:null,
@@ -1220,6 +1279,12 @@ function mkTrack(name, buffer, nativeSR, file) {
     specData:null, specFrames:0, specHop:0, specH:0, specMaxBin:0, specGlobalPeak:-Infinity,
     waveformCanvas:null, waveformWrapper:null, waveformRow:null, waveformPh:null
   };
+}
+
+function getParentFolderName(path) {
+  if (!path) return '';
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.length >= 2 ? parts[parts.length - 2] : '';
 }
 
 function buildSpecBody(track, h) {
@@ -1301,25 +1366,18 @@ function buildSpecBody(track, h) {
   track.wrapper.addEventListener('wheel', wheelHandler, { passive: false });
   track.waveformWrapper.addEventListener('wheel', wheelHandler, { passive: false });
 
-  /* Shift+drag = selection zoom */
+  /* Shift+drag = selection zoom (listeners registered on mousedown, removed on mouseup) */
   let dragStartX = null, selBox = null;
-  track.wrapper.addEventListener('mousedown', e => {
-    if (e.shiftKey) {
-      e.preventDefault(); e.stopPropagation();
-      dragStartX = e.clientX;
-      selBox = document.createElement('div');
-      selBox.className = 'zoom-selection'; selBox.style.height = '100%';
-      track.wrapper.appendChild(selBox);
-    }
-  });
-  document.addEventListener('mousemove', e => {
+  const onDragMove = e => {
     if (dragStartX === null || !selBox || !track.canvas) return;
     const rect = track.canvas.getBoundingClientRect();
     const left = Math.max(0, Math.min(dragStartX, e.clientX) - rect.left);
     const right = Math.min(rect.width, Math.max(dragStartX, e.clientX) - rect.left);
     selBox.style.left = left + 'px'; selBox.style.width = (right - left) + 'px';
-  });
-  document.addEventListener('mouseup', e => {
+  };
+  const onDragUp = e => {
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('mouseup', onDragUp);
     if (dragStartX === null) return;
     const rect = track.canvas.getBoundingClientRect();
     const x1 = Math.max(0, (Math.min(dragStartX, e.clientX) - rect.left) / rect.width);
@@ -1332,6 +1390,17 @@ function buildSpecBody(track, h) {
     setTrackView(track, ns, ne); syncGroupZoom(track); redrawTrack(track); updateRuler(track);
     if (track.groupId != null) { const sibs = getSiblings(track); for (const s of sibs) { if (s.id !== track.id) { redrawTrack(s); updateRuler(s); } } }
     updatePlayheads();
+  };
+  track.wrapper.addEventListener('mousedown', e => {
+    if (e.shiftKey) {
+      e.preventDefault(); e.stopPropagation();
+      dragStartX = e.clientX;
+      selBox = document.createElement('div');
+      selBox.className = 'zoom-selection'; selBox.style.height = '100%';
+      track.wrapper.appendChild(selBox);
+      document.addEventListener('mousemove', onDragMove);
+      document.addEventListener('mouseup', onDragUp);
+    }
   });
 
   if (track.loaded) {
@@ -1415,8 +1484,8 @@ function getSiblings(t) {
 /* ========================================================================
  *  STANDALONE TRACK
  * ======================================================================== */
-function createStandalone(name, buffer, nativeSR, file) {
-  const t = mkTrack(name, buffer, nativeSR, file);
+function createStandalone(name, buffer, nativeSR, file, filePath) {
+  const t = mkTrack(name, buffer, nativeSR, file, filePath);
   const infoText = t.loaded
     ? (function(){ const b=buffer; const ch=b.numberOfChannels===1?'Mono':b.numberOfChannels===2?'Stereo':b.numberOfChannels+'ch'; return ch+' '+(t.sr/1000).toFixed(1)+'kHz | '+fmt(t.duration); })()
     : '…';
@@ -1491,14 +1560,14 @@ function createDiffGroup(baseName, items) {
   cols.className = 'diff-columns';
 
   items.forEach((item, idx) => {
-    const t = mkTrack(item.name, item.buffer, item.nativeSR, item.file);
+    const t = mkTrack(item.name, item.buffer, item.nativeSR, item.file, item.filePath);
     t.groupId = gid;
     const lane = document.createElement('div');
     lane.className = 'diff-lane';
 
     const lbl = document.createElement('div');
     lbl.className = 'diff-lane-label';
-    const tagText = item.suffix ? item.suffix : ('Track '+(idx+1));
+    const tagText = item.suffix ? item.suffix : (item.filePath ? getParentFolderName(item.filePath) || ('Track '+(idx+1)) : ('Track '+(idx+1)));
     const tagCls  = TAG_CSS[idx % TAG_CSS.length];
     const srText  = t.loaded ? (t.sr/1000).toFixed(1)+'kHz' : '…';
     lbl.innerHTML =
@@ -1573,22 +1642,23 @@ function deleteTrackFromGroup(trackId) {
     const remainingId = g.trackIds.find(id => id !== t.id);
     const remaining = tracks.find(tr => tr.id === remainingId);
     if (remaining) {
-      const { name, buffer, nativeSR, file } = remaining;
+      const { name, buffer, nativeSR, file, filePath } = remaining;
       if (remaining.playing) stopSource(remaining);
       removeDiffGroupQuietly(g.id);
-      createStandalone(name, buffer, nativeSR, file);
+      createStandalone(name, buffer, nativeSR, file, filePath);
     } else { removeDiffGroupQuietly(g.id); }
   } else {
     const baseName = g.baseName;
     const remainingItems = g.trackIds.filter(id => id !== t.id).map(id => {
       const tr = tracks.find(x => x.id === id);
       if (!tr) return null;
-      const tag = extractTag(stripExt(tr.name)).tag || tr.name;
-      return { name: tr.name, buffer: tr.buffer, file: tr.file, suffix: tag, nativeSR: tr.nativeSR };
+      const tag = extractTag(stripExt(tr.name)).tag;
+      const suffix = tag || (tr.filePath ? getParentFolderName(tr.filePath) : tr.name);
+      return { name: tr.name, buffer: tr.buffer, file: tr.file, suffix, nativeSR: tr.nativeSR, filePath: tr.filePath };
     }).filter(Boolean);
     removeDiffGroupQuietly(g.id);
     if (remainingItems.length >= 2) createDiffGroup(baseName, remainingItems);
-    else if (remainingItems.length === 1) { const it = remainingItems[0]; createStandalone(it.name, it.buffer, it.nativeSR, it.file); }
+    else if (remainingItems.length === 1) { const it = remainingItems[0]; createStandalone(it.name, it.buffer, it.nativeSR, it.file, it.filePath); }
   }
   const newCard = tracksBox.lastElementChild;
   if (newCard && newCard !== ph && ph.parentNode) tracksBox.insertBefore(newCard, ph);
@@ -1673,7 +1743,12 @@ function clearAll() {
   stopAll();
   tracks.forEach(t => { if(t.el) t.el.remove(); });
   groups.forEach(g => { if(g.el) g.el.remove(); });
-  tracks=[]; groups=[]; activeTrackId=null; tracksBox.innerHTML='';
+  tracks=[]; groups=[]; activeTrackId=null;
+  loadQueue.length = 0; activeLoads = 0;
+  lazyObserver.disconnect();
+  if (loadMoreBtn) { loadMoreBtn.remove(); loadMoreBtn = null; }
+  fileURIsQueue = [];
+  tracksBox.innerHTML='';
   refreshUI();
 }
 
