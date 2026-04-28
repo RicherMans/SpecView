@@ -110,7 +110,7 @@ export function computeSpec(track: Track, H: number): void {
   } else {
     hop = defaultHop;
   }
-  const nF = Math.max(1, Math.min(W, Math.floor((nS - FFT_SIZE) / hop) + 1));
+  const nF = Math.max(1, Math.floor((nS - FFT_SIZE) / hop) + 1);
 
   const re = new Float64Array(FFT_SIZE);
   const im = new Float64Array(FFT_SIZE);
