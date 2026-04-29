@@ -100,13 +100,11 @@ export function computeSpec(track: Track, H: number): void {
   const binHz = sr / FFT_SIZE;
   const maxBin = Math.min(nBins - 1, Math.ceil(nyquist / binHz));
 
-  // Adaptive hop: use smaller hop for short files to fill the canvas width
   const W = track.canvas ? track.canvas.width : 1000;
   const defaultHop = FFT_SIZE / HOP_DIV;
-  const defaultFrames = Math.max(1, Math.floor((nS - FFT_SIZE) / defaultHop) + 1);
   let hop: number;
-  if (defaultFrames < W && nS > FFT_SIZE) {
-    hop = Math.max(1, Math.floor((nS - FFT_SIZE) / (W - 1)));
+  if (nS > FFT_SIZE) {
+    hop = Math.max(1, Math.floor((nS - FFT_SIZE) / Math.max(1, W - 1)));
   } else {
     hop = defaultHop;
   }
@@ -174,13 +172,6 @@ export function drawSpec(track: Track): void {
   const nF = specFrames;
   const hop = specHop;
 
-  // Map viewStart/viewEnd to frame indices
-  const startSample = Math.max(0, Math.floor(track.viewStart * sr));
-  const endSample = Math.min(nS, Math.ceil(track.viewEnd * sr));
-  const startFrame = Math.max(0, Math.floor((startSample - FFT_SIZE / 2) / hop));
-  const endFrame = Math.min(nF - 1, Math.ceil((endSample - FFT_SIZE / 2) / hop));
-  const visibleFrames = Math.max(1, endFrame - startFrame + 1);
-
   // Use global peak for consistent normalization regardless of zoom level
   // This prevents silent regions from suddenly appearing bright when zoomed in
   let peak = track.specGlobalPeak;
@@ -188,17 +179,25 @@ export function drawSpec(track: Track): void {
   const floor = peak - DB_RANGE;
   const invRange = 1 / DB_RANGE;
 
+  const halfFFT = FFT_SIZE / 2;
+  const viewSpan = track.viewEnd - track.viewStart;
+
   const img = ctx.createImageData(W, H);
   const px = img.data;
   const px32 = new Uint32Array(px.buffer);
   const isLE = new Uint8Array(new Uint32Array([0x0A0B0C0D]).buffer)[0] === 0x0D;
 
   for (let x = 0; x < W; x++) {
-    // Map pixel x to a frame in the visible range
-    const col = Math.min(startFrame + Math.round(x * visibleFrames / W), endFrame);
-    const base = col * H;
+    // Map pixel x directly to time, then find the nearest STFT frame.
+    // Frame c represents audio centered at time (c * hop + FFT_SIZE/2) / sr,
+    // so this keeps the spectrogram time axis aligned with the waveform and playhead.
+    const t_x = track.viewStart + (x / W) * viewSpan;
+    const col = Math.max(0, Math.min(nF - 1, Math.round((t_x * sr - halfFFT) / hop)));
+    const base = col * specH;
     for (let y = 0; y < H; y++) {
-      const db = specData[base + y];
+      // Scale y from canvas height to cached specData height when they differ
+      const srcY = H === specH ? y : Math.round(y * (specH - 1) / (H - 1));
+      const db = specData[base + srcY];
       let norm = (db - floor) * invRange;
       if (norm < 0) norm = 0; else if (norm > 1) norm = 1;
       const li = (norm * 255 + 0.5) | 0;
@@ -220,7 +219,12 @@ export function drawSpec(track: Track): void {
  */
 export function renderSpec(track: Track): void {
   const H = track.canvas ? track.canvas.height : SPEC_H;
-  if (!track.specData) {
+  const W = track.canvas ? track.canvas.width : 0;
+  if (W === 0) return; // canvas not laid out yet — skip until it has a real width
+  if (!track.specData || track.specH !== H ||
+      (W > 1 && track.specFrames <= 1 && track.buffer && track.buffer.length > FFT_SIZE)) {
+    // Recompute if: no data, height changed (e.g. standalone→diff group), or
+    // only 1 frame was computed due to canvas.width being 0 at compute time.
     computeSpec(track, H);
   }
   drawSpec(track);

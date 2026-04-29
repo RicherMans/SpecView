@@ -61,7 +61,7 @@ export interface AnalysisSpan {
 export interface DecodedItem {
   name: string;        // basename, used for grouping key
   filePath?: string;   // full path, used for cross-directory display
-  buffer: AudioBuffer;
+  buffer: AudioBuffer | null;  // null for lazy tracks not yet loaded
   nativeSR: number;
   suffix?: string;
   lazyUri?: string;    // for lazy tracks that haven't been loaded yet

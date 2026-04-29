@@ -4,7 +4,7 @@
 
 A VS Code extension for viewing audio spectrograms with playback, auto-grouping for A/B comparison, and ML-powered audio classification.
 
-Based on [SpecView](https://github.com/RicherMans/SpecView) by Heinrich.
+Co-developed with [SpecView](https://github.com/RicherMans/SpecView) by Heinrich, with VS Code extension and feature enhancements by [xingws](https://github.com/xingws).
 
 ## Features
 
@@ -31,6 +31,10 @@ Toggle the waveform view via the **Waveform** checkbox in the toolbar to display
 - Shows amplitude envelope as min/max vertical bars per pixel column
 - Synced playhead with the spectrogram view
 - Ctrl+wheel and Shift+drag work on both the waveform and spectrogram
+
+### Lazy Loading
+
+For large file sets, tracks are decoded on scroll for fast initial loading. A "Load More" button appears at the bottom of the track list to load the next batch of files on demand.
 
 ### Time Axis Zoom
 

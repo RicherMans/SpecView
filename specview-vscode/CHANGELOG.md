@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.3
+
+### Bug Fixes
+
+- Fixed long audio spectrogram truncation — STFT hop auto-adjusts for full duration
+- Fixed large/stereo file loading — base64 decoding yields to event loop
+- Fixed `activeLoads` counter negative after `clearAll()`
+- Fixed group zoom inverted range when sibling is shorter
+- Fixed `Analyze` button not enabled after lazy load completes
+
+### Improvements
+
+- Audio files sent one-by-one to avoid massive postMessage payload
+- Lazy URIs use `handleFiles` for proper grouping (removed `createLazyCard`)
+- Diff group lanes have individual rulers
+- Incremental rendering during batch decode
+
 ## 0.1.2
 
 ### New Features
