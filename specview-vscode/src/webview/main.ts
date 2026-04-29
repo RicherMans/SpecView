@@ -45,7 +45,7 @@ window.addEventListener('message', (event) => {
     const cb = fileDataCallbacks.get(msg.filePath);
     if (cb) {
       fileDataCallbacks.delete(msg.filePath);
-      cb.resolve(base64ToArrayBuffer(msg.base64));
+      base64ToArrayBuffer(msg.base64).then(cb.resolve, cb.reject);
       return;
     }
     // Late response after timeout — discard
@@ -66,7 +66,7 @@ window.addEventListener('message', (event) => {
 
 async function handleMessage(msg: any): Promise<void> {
   if (msg.type === 'fileData') {
-    const raw = base64ToArrayBuffer(msg.base64);
+    const raw = await base64ToArrayBuffer(msg.base64);
     await decodeAndAddFile(msg.name, msg.filePath, raw);
   } else if (msg.type === 'filesData') {
     await decodeAndAddBatch(msg.files);
@@ -103,13 +103,18 @@ export function requestFileData(uri: string): Promise<ArrayBuffer> {
 // Signal readiness to extension host
 vscode.postMessage({ type: 'ready' });
 
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+async function base64ToArrayBuffer(base64: string): Promise<ArrayBuffer> {
+  // Decode base64 in chunks to avoid data URI size limits and keep the UI responsive.
+  const len = base64.length;
+  const CHUNK = 1 << 20; // 1M chars per chunk
+  const raw = new Uint8Array((len * 3) >> 2);
+  let pos = 0;
+  for (let i = 0; i < len; i += CHUNK) {
+    const chunk = atob(base64.substring(i, Math.min(i + CHUNK, len)));
+    for (let j = 0; j < chunk.length; j++) raw[pos++] = chunk.charCodeAt(j);
+    if (i + CHUNK < len) await new Promise<void>(r => setTimeout(r, 0));
   }
-  return bytes.buffer;
+  return raw.buffer;
 }
 
 async function decodeAndAddFile(name: string, filePath: string | undefined, arrayBuffer: ArrayBuffer): Promise<void> {
@@ -131,13 +136,14 @@ async function decodeAndAddFile(name: string, filePath: string | undefined, arra
 const DECODE_CONCURRENCY = 3;
 
 async function decodeAndAddBatch(files: { name: string; filePath?: string; base64: string }[]): Promise<void> {
-  const items: DecodedItem[] = [];
-  // Process in chunks to limit concurrent memory usage
+  // Process in chunks to limit concurrent memory usage.
+  // Each chunk is decoded and rendered incrementally to avoid accumulating
+  // all decoded AudioBuffers in memory before any UI update.
   for (let i = 0; i < files.length; i += DECODE_CONCURRENCY) {
     const chunk = files.slice(i, i + DECODE_CONCURRENCY);
     const promises = chunk.map(async (f) => {
       try {
-        const raw = base64ToArrayBuffer(f.base64);
+        const raw = await base64ToArrayBuffer(f.base64);
         const nativeSR = parseNativeSampleRate(raw) || null;
         const decoded = await audioCtx.decodeAudioData(raw.slice(0));
         return {
@@ -152,9 +158,9 @@ async function decodeAndAddBatch(files: { name: string; filePath?: string; base6
       }
     });
     const results = (await Promise.all(promises)).filter(Boolean) as DecodedItem[];
-    items.push(...results);
+    // Render incrementally: add each chunk to UI as soon as it's decoded
+    if (results.length > 0) handleFiles(results);
   }
-  if (items.length > 0) handleFiles(items);
 }
 
 // Drop zone click → ask extension host to open file dialog

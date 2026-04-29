@@ -416,13 +416,8 @@ export class SpecViewEditorProvider implements vscode.CustomReadonlyEditorProvid
       const firstBatch = audioUris.slice(0, this.LAZY_THRESHOLD);
       const remainingUris = audioUris.slice(this.LAZY_THRESHOLD);
 
-      // Send first batch decoded
-      const firstFiles = await this.readAudioFiles(firstBatch);
-      if (firstFiles.length === 1) {
-        webviewPanel.webview.postMessage({ type: 'fileData', ...firstFiles[0] });
-      } else if (firstFiles.length > 1) {
-        webviewPanel.webview.postMessage({ type: 'filesData', files: firstFiles });
-      }
+      // Send first batch one-by-one to avoid a single massive postMessage payload
+      await this.sendAudioFilesOneByOne(webviewPanel, firstBatch);
 
       // Send remaining as original file URIs for on-demand loading
       // NOTE: we send the original file:// URI (not webview URI) because
@@ -435,30 +430,32 @@ export class SpecViewEditorProvider implements vscode.CustomReadonlyEditorProvid
         webviewPanel.webview.postMessage({ type: 'fileURIs', files: fileUris });
       }
     } else {
-      // Small batch: send all decoded at once
-      const files = await this.readAudioFiles(audioUris);
-      if (files.length === 1) {
-        webviewPanel.webview.postMessage({ type: 'fileData', ...files[0] });
-      } else if (files.length > 1) {
-        webviewPanel.webview.postMessage({ type: 'filesData', files });
-      }
+      // Small batch: send one-by-one to avoid a single massive postMessage payload
+      await this.sendAudioFilesOneByOne(webviewPanel, audioUris);
     }
   }
 
-  private static async readAudioFiles(uris: vscode.Uri[]): Promise<{ name: string; filePath: string; base64: string }[]> {
-    const filePromises = uris.map(async (uri) => {
+  /**
+   * Read and send audio files one-by-one as individual fileData messages.
+   * This avoids accumulating all base64 data into a single massive postMessage
+   * which would block the webview main thread during deserialization.
+   */
+  private static async sendAudioFilesOneByOne(
+    webviewPanel: vscode.WebviewPanel,
+    uris: vscode.Uri[]
+  ): Promise<void> {
+    for (const uri of uris) {
       try {
         const data = await vscode.workspace.fs.readFile(uri);
-        return {
+        webviewPanel.webview.postMessage({
+          type: 'fileData',
           name: path.basename(uri.fsPath),
           filePath: uri.fsPath,
           base64: Buffer.from(data).toString('base64'),
-        };
+        });
       } catch (e) {
         console.error('Failed to read file:', uri.fsPath, e);
-        return null;
       }
-    });
-    return (await Promise.all(filePromises)).filter(Boolean) as { name: string; filePath: string; base64: string }[];
+    }
   }
 }

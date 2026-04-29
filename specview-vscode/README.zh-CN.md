@@ -1,10 +1,8 @@
 # SpecView - 音频频谱图查看器 (VS Code 扩展)
 
-[English](https://github.com/RicherMans/SpecView/blob/main/specview-vscode/README.md)
-
 一款用于查看音频频谱图的 VS Code 扩展，支持音频播放、自动分组 A/B 对比，以及基于机器学习的音频分类。
 
-基于 [SpecView](https://github.com/RicherMans/SpecView)（作者：Heinrich）。
+与 [SpecView](https://github.com/RicherMans/SpecView)（作者：Heinrich）共同开发，VS Code 扩展及功能增强由 [xingws](https://github.com/xingws) 完成。
 
 ## 功能介绍
 
@@ -31,6 +29,10 @@
 - 每像素列以 min/max 竖线展示振幅包络
 - 波形播放头与频谱播放头同步
 - Ctrl+滚轮和 Shift+拖拽在波形和频谱上均生效
+
+### 懒加载
+
+对于大型文件集，轨道按需解码以实现快速初始加载。轨道列表底部显示"Load More"按钮，点击可加载下一批文件。
 
 ### 时间轴缩放
 

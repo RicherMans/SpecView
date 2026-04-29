@@ -44,7 +44,12 @@ function drainLoadQueue(): void {
     const t = loadQueue.shift()!;
     if (t.loaded || t._loading || !isTrackAlive(t)) continue;
     activeLoads++;
-    loadTrack(t).finally(() => { activeLoads--; drainLoadQueue(); });
+    loadTrack(t).finally(() => {
+      // Guard: only decrement if still positive. After clearAll() force-resets
+      // activeLoads to 0, stale in-flight completions must not push it negative.
+      if (activeLoads > 0) activeLoads--;
+      drainLoadQueue();
+    });
   }
 }
 
@@ -138,6 +143,8 @@ async function loadTrack(t: Track): Promise<void> {
       }
     }
     if (loading && loading.parentNode) loading.remove();
+    // Enable analyze button for lazy-loaded tracks (created with disabled attribute)
+    if (t.analyzeBtn) (t.analyzeBtn as HTMLButtonElement).disabled = false;
     // Update card info text
     updateCardInfo(t);
     updateRuler(t);
@@ -457,12 +464,6 @@ function populateRuler(el: HTMLElement, viewStart: number, viewEnd: number): voi
 function updateRuler(track: Track): void {
   if (!track.rulerEl) return;
   populateRuler(track.rulerEl, track.viewStart, track.viewEnd);
-  // Also update rulers of siblings in group
-  if (track.groupId != null) {
-    // For diff groups, there is one shared ruler. Find it.
-    // The ruler is attached to the card, not the individual track.
-    // All tracks in a group share the same viewStart/viewEnd after sync.
-  }
 }
 
 // ========== ZOOM FUNCTIONS ==========
@@ -519,10 +520,15 @@ function syncGroupZoom(track: Track): void {
   const sibs = getSiblings(track);
   for (const s of sibs) {
     if (s.id === track.id) continue;
-    s.viewStart = track.viewStart;
+    // Clamp both viewStart and viewEnd to the sibling's duration to prevent
+    // inverted ranges (viewStart > viewEnd) when the sibling is shorter.
     s.viewEnd = Math.min(track.viewEnd, s.duration);
+    s.viewStart = Math.min(track.viewStart, s.viewEnd);
     if (s.viewEnd - s.viewStart < MIN_VIEW_SPAN) {
       s.viewEnd = Math.min(s.duration, s.viewStart + MIN_VIEW_SPAN);
+      if (s.viewEnd - s.viewStart < MIN_VIEW_SPAN) {
+        s.viewStart = Math.max(0, s.viewEnd - MIN_VIEW_SPAN);
+      }
     }
   }
 }
@@ -881,7 +887,7 @@ function createStandalone(name: string, buffer: AudioBuffer | null, nativeSR: nu
   hdr.className = 'card-header';
   hdr.innerHTML =
     '<span class="card-title" title="' + esc(name) + '">' + esc(name) + '</span>' +
-    '<button class="btn-analyze" title="Run audio classification">Analyze</button>' +
+    '<button class="btn-analyze" title="Run audio classification"' + (t.loaded ? '' : ' disabled') + '>Analyze</button>' +
     '<span class="card-info">' + esc(infoText) + '</span>' +
     '<button class="card-remove" title="Remove">&times;</button>';
   hdr.addEventListener('click', () => setActive(t.id));
@@ -907,7 +913,7 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): void {
   const gid = nextGrpId++;
   const grpTracks: Track[] = [];
   const anyLoaded = items.some(i => !!i.buffer);
-  const maxDur = anyLoaded ? Math.max(...items.filter(i => i.buffer).map(i => i.buffer.duration)) : 0;
+  const maxDur = anyLoaded ? Math.max(...items.filter(i => i.buffer).map(i => i.buffer!.duration)) : 0;
   const card = document.createElement('div');
   card.className = 'card';
   card.dataset.groupId = String(gid);
@@ -943,7 +949,7 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): void {
     lbl.innerHTML =
       '<span class="diff-lane-tag ' + tagCls + '">' + esc(tagText) + '</span>' +
       '<span class="diff-lane-name">' + esc(item.name) + '</span>' +
-      '<button class="btn-analyze" title="Run audio classification">Analyze</button>' +
+      '<button class="btn-analyze" title="Run audio classification"' + (t.loaded ? '' : ' disabled') + '>Analyze</button>' +
       '<span class="card-info">' + esc(srText) + '</span>' +
       '<span class="diff-lane-playing"></span>' +
       '<button class="lane-remove" title="Remove this track">&times;</button>';
@@ -955,6 +961,7 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): void {
     t.laneLabel = lbl;
 
     lane.appendChild(buildSpecBody(t, SPEC_H_DIFF));
+    lane.appendChild(buildRuler(t));
     cols.appendChild(lane);
 
     t.el = card;
@@ -964,12 +971,6 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): void {
   });
 
   card.appendChild(cols);
-  // Use first track for the shared ruler
-  const rulerTrack = grpTracks[0];
-  const rulerEl = buildRuler(rulerTrack);
-  card.appendChild(rulerEl);
-  // Share the ruler element reference across all group tracks
-  for (const t of grpTracks) t.rulerEl = rulerEl;
 
   tracksBox.appendChild(card);
   groups.push({ id: gid, baseName, trackIds: grpTracks.map(t => t.id), el: card });
@@ -1224,7 +1225,7 @@ export function handleFiles(items: DecodedItem[]): void {
           // No known tag — add with parent folder name as suffix
           addToDiffGroup(existingGroup, { ...newItem, suffix: newItem.filePath ? getParentFolderName(newItem.filePath) : undefined });
         } else {
-          createStandalone(newItem.name, newItem.buffer, newItem.nativeSR, newItem.filePath);
+          createStandalone(newItem.name, newItem.buffer, newItem.nativeSR, newItem.filePath, newItem.lazyUri);
         }
       }
     }
@@ -1240,31 +1241,6 @@ const LOAD_MORE_BATCH = 100;
 let fileURIsQueue: { name: string; uri: string }[] = [];
 let loadMoreBtn: HTMLElement | null = null;
 
-function createLazyCard(f: { name: string; uri: string }): void {
-  const t = mkTrack(f.name, null, 0, undefined, f.uri);
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.dataset.trackId = String(t.id);
-  const hdr = document.createElement('div');
-  hdr.className = 'card-header';
-  hdr.innerHTML =
-    '<span class="card-title" title="' + esc(f.name) + '">' + esc(f.name) + '</span>' +
-    '<button class="btn-analyze" title="Run audio classification" disabled>Analyze</button>' +
-    '<span class="card-info">\u2026</span>' +
-    '<button class="card-remove" title="Remove">&times;</button>';
-  hdr.addEventListener('click', () => setActive(t.id));
-  hdr.querySelector('.card-remove')!.addEventListener('click', e => { e.stopPropagation(); removeTrack(t.id); });
-  t.analyzeBtn = hdr.querySelector('.btn-analyze');
-  card.appendChild(hdr);
-  card.appendChild(buildSpecBody(t, SPEC_H));
-  card.appendChild(buildRuler(t));
-  tracksBox.appendChild(card);
-  t.el = card;
-  tracks.push(t);
-  if (!activeTrackId) activeTrackId = t.id;
-  lazyObserver.observe(card);
-}
-
 export function handleFileURIs(files: { name: string; uri: string }[]): void {
   fileURIsQueue = fileURIsQueue.concat(files);
   loadMoreFileURIs();
@@ -1272,9 +1248,18 @@ export function handleFileURIs(files: { name: string; uri: string }[]): void {
 
 export function loadMoreFileURIs(): void {
   const batch = fileURIsQueue.splice(0, LOAD_MORE_BATCH);
-  for (const f of batch) createLazyCard(f);
+  // Convert lazy URIs to DecodedItems so handleFiles can do proper grouping
+  // (same stem → diff group, same name different dir → diff group, etc.)
+  const items: DecodedItem[] = batch.map(f => ({
+    name: f.name,
+    buffer: null,
+    nativeSR: 0,
+    filePath: f.uri,   // URI string used for directory-based grouping
+    lazyUri: f.uri,
+  }));
+  if (items.length > 0) handleFiles(items);
   updateLoadMoreBtn();
-  refreshUI();
+  // refreshUI already called by handleFiles, but ensure btn state is up to date
 }
 
 function updateLoadMoreBtn(): void {
