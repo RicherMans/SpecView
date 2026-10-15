@@ -4,7 +4,7 @@ import {
   getActive, switchLane, getTracks,
   zoomIn, zoomOut, zoomFit, setWaveformVisible, pauseAll,
   moveToNextCard, moveToPrevCard, deleteActiveTrack, handleFileURIs,
-  receiveMetaData, setMetaVisible,
+  receiveMetaData, receiveMetaURIs, setMetaVisible,
 } from './ui';
 import { getPos } from './audio';
 import { runAnalysisAll } from './analysis';
@@ -33,39 +33,74 @@ const vscode = acquireVsCodeApi();
 (window as any).__vscodePostMessage = vscode.postMessage.bind(vscode);
 
 // Listen for messages from extension host
-const fileDataCallbacks = new Map<string, { resolve: (raw: ArrayBuffer) => void; reject: (e: Error) => void }>();
+const fileDataCallbacks = new Map<string, {
+  resolve: (raw: ArrayBuffer) => void;
+  reject: (e: Error) => void;
+  buffer?: Uint8Array;
+  received: number;
+}>();
 
-// Message handling: lazy-load callbacks are resolved synchronously (fast path),
-// everything else goes through a serial queue to preserve ordering
-// (ensures filesData finishes decoding before fileURIs creates lazy cards).
+// Message handling: chunked lazy-load responses are resolved synchronously (fast
+// path); everything else goes through a serial queue to preserve ordering.
 let messageQueue = Promise.resolve();
+// Bumped by Clear All so messages queued before it (fileURIs/metaData) and any
+// in-flight lazy load cannot repopulate the view afterwards.
+let clearEpoch = 0;
 
 window.addEventListener('message', (event) => {
   const msg = event.data;
 
-  // Fast path: resolve lazy-load callbacks synchronously without entering the queue.
-  // This avoids blocking on large batch decodes that may be in the queue.
-  if (msg.type === 'fileData' && msg.filePath) {
-    const cb = fileDataCallbacks.get(msg.filePath);
-    if (cb) {
-      fileDataCallbacks.delete(msg.filePath);
-      base64ToArrayBuffer(msg.base64).then(cb.resolve, cb.reject);
-      return;
+  // Fast path: chunked source assembly must bypass the serial UI queue.
+  if (msg.type === 'fileDataStart' && msg.requestId) {
+    const cb = fileDataCallbacks.get(msg.requestId);
+    if (!cb) return;
+    try {
+      if (!Number.isSafeInteger(msg.size) || msg.size < 0) throw new Error('Invalid file data start');
+      cb.buffer = new Uint8Array(msg.size);
+      cb.received = 0;
+    } catch (error) {
+      fileDataCallbacks.delete(msg.requestId);
+      cb.reject(error instanceof Error ? error : new Error(String(error)));
     }
-    // Late response after timeout — discard
-    if (msg.filePath.startsWith('file://') || msg.filePath.startsWith('tar:')) return;
+    return;
+  }
+  if (msg.type === 'fileDataChunk' && msg.requestId) {
+    const cb = fileDataCallbacks.get(msg.requestId);
+    if (!cb) return;
+    try {
+      if (!cb.buffer || msg.offset !== cb.received || typeof msg.base64 !== 'string') throw new Error('Invalid file data chunk');
+      const chunk = decodeBase64Chunk(msg.base64);
+      if (cb.received + chunk.byteLength > cb.buffer.byteLength) throw new Error('File data exceeds declared size');
+      cb.buffer.set(chunk, cb.received);
+      cb.received += chunk.byteLength;
+    } catch (error) {
+      fileDataCallbacks.delete(msg.requestId);
+      cb.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    return;
+  }
+  if (msg.type === 'fileDataEnd' && msg.requestId) {
+    const cb = fileDataCallbacks.get(msg.requestId);
+    if (!cb) return;
+    fileDataCallbacks.delete(msg.requestId);
+    if (!cb.buffer || cb.received !== cb.buffer.byteLength) cb.reject(new Error('Incomplete file data response'));
+    else cb.resolve(cb.buffer.buffer as ArrayBuffer);
+    return;
   }
   if (msg.type === 'fileDataError') {
-    const cb = fileDataCallbacks.get(msg.uri);
+    const cb = fileDataCallbacks.get(msg.requestId);
     if (cb) {
-      fileDataCallbacks.delete(msg.uri);
+      fileDataCallbacks.delete(msg.requestId);
       cb.reject(new Error(msg.message));
     }
     return;
   }
 
-  // Serial queue for everything else
-  messageQueue = messageQueue.then(() => handleMessage(msg)).catch(e => console.error('Message handler error:', e));
+  // Serial queue for everything else; drop messages that predate a Clear All.
+  const epoch = clearEpoch;
+  messageQueue = messageQueue
+    .then(() => epoch === clearEpoch ? handleMessage(msg) : undefined)
+    .catch(e => console.error('Message handler error:', e));
 });
 
 async function handleMessage(msg: any): Promise<void> {
@@ -80,26 +115,30 @@ async function handleMessage(msg: any): Promise<void> {
     handleFileURIs(msg.files);
   } else if (msg.type === 'metaData') {
     receiveMetaData(msg.items || []);
+  } else if (msg.type === 'metaURIs') {
+    receiveMetaURIs(msg.files || []);
   } else if (msg.type === 'error') {
     console.error('Extension error:', msg.message);
   }
 }
 
 /**
- * Request file data from extension host for lazy-loaded track.
- * Returns decoded ArrayBuffer when data arrives.
+ * Request file data from extension host for a lazy-loaded track.
+ * Returns decoded ArrayBuffer when the chunked response completes.
  */
-export function requestFileData(uri: string): Promise<ArrayBuffer> {
+export function requestFileData(sourceId: string): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
     const timeout = setTimeout(() => {
-      fileDataCallbacks.delete(uri);
-      reject(new Error('Timeout requesting file data: ' + uri));
-    }, 30000);
-    fileDataCallbacks.set(uri, {
+      fileDataCallbacks.delete(requestId);
+      reject(new Error('Timeout requesting file data: ' + sourceId));
+    }, 120000);
+    fileDataCallbacks.set(requestId, {
+      received: 0,
       resolve: (raw: ArrayBuffer) => { clearTimeout(timeout); resolve(raw); },
       reject: (e: Error) => { clearTimeout(timeout); reject(e); },
     });
-    vscode.postMessage({ type: 'requestFileData', uri });
+    vscode.postMessage({ type: 'requestFileData', sourceId, requestId });
   });
 }
 
@@ -108,6 +147,13 @@ export function requestFileData(uri: string): Promise<ArrayBuffer> {
 
 // Signal readiness to extension host
 vscode.postMessage({ type: 'ready' });
+
+function decodeBase64Chunk(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const data = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) data[index] = binary.charCodeAt(index);
+  return data;
+}
 
 async function base64ToArrayBuffer(base64: string): Promise<ArrayBuffer> {
   // Decode base64 in chunks to avoid data URI size limits and keep the UI responsive.
@@ -193,6 +239,11 @@ btnZoomOut.addEventListener('click', zoomOut);
 btnZoomFit.addEventListener('click', zoomFit);
 btnAnalyzeAll.addEventListener('click', () => { runAnalysisAll(getTracks()); });
 btnClear.addEventListener('click', () => {
+  clearEpoch++;
+  for (const [requestId, cb] of Array.from(fileDataCallbacks)) {
+    fileDataCallbacks.delete(requestId);
+    cb.reject(new Error('Cleared'));
+  }
   clearAll();
   vscode.postMessage({ type: 'clearLoaded' });
 });

@@ -2,7 +2,7 @@
   "name": "specview",
   "displayName": "SpecView - Audio Spectrogram Viewer",
   "description": "Audio spectrogram viewer for audio analysis: play & compare audio files (WAV/MP3/FLAC/OGG), auto A/B diff grouping, and ML-powered audio classification",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "sunxingwei",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -110,5 +110,8 @@
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "tar-stream": "3.1.7"
   }
 }

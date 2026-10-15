@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.2
+
+### Bug Fixes
+
+- Fixed lazy-loaded multichannel archive tracks failing with an `insertBefore` DOM error when the card body is rebuilt into per-channel lanes.
+- Fixed Clear All allowing queued messages and in-flight lazy loads to repopulate the view afterwards.
+- Fixed the virtual window desynchronizing after multichannel group splitting, lane deletion and regrouping.
+- Fixed paired JSON metadata going missing after scrolling a large archive/folder away and back (stable stem key across recycle/restore, and re-fetching for already-loaded cards).
+- Fixed JSON field paths so keys containing `.` or markup characters no longer break field selection or inject HTML.
+
+### Improvements
+
+- `.tar` archives are indexed by reading only 512-byte headers (no whole-file load), so multi-gigabyte archives open without exhausting memory; entries are read on demand.
+- `.tar.gz`/`.tgz` archives stream-decompress to a per-panel temp directory with expansion, path, cache and disk-space limits.
+- Added a per-panel session with opaque source IDs; the webview can no longer request arbitrary files or URIs.
+- Archive audio loads lazily through a single-task, viewport-scoped queue with a bounded card window; lazy entries are sent in batches so large folders stay responsive.
+- JSON metadata is now lazy: a `.json` is fetched only after its same-stem audio has loaded; `.json` files with no matching audio are fetched once audio loading settles and shown as standalone cards.
+- Volume slider now uses a square curve reaching +12 dB at full scale (default unity), so quiet material can be boosted.
+
 ## 0.2.1
 
 ### Bug Fixes

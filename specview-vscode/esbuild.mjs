@@ -1,6 +1,11 @@
 import * as esbuild from 'esbuild';
+import { rm } from 'node:fs/promises';
 
 const watch = process.argv.includes('--watch');
+
+// Remove previous build output (incl. stray `tsc` artefacts) so the packaged
+// extension only ships the esbuild bundles.
+if (!watch) await rm('dist', { recursive: true, force: true });
 
 const sharedConfig = {
   bundle: true,

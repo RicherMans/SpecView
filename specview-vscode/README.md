@@ -18,7 +18,7 @@ Supported formats: **WAV, MP3, OGG, FLAC, M4A, AAC, WebM, WMA, AIFF, Opus** — 
 
 - **Play / Pause / Stop** controls in the toolbar
 - **Click on spectrogram** to seek to any position (preserves playback state)
-- **Volume control** slider
+- **Volume control** slider (square curve, up to +12 dB at full scale)
 - Real-time playhead tracking with time display
 - **Auto-pause**: Playback automatically pauses when you switch to another VS Code panel or tab
 
@@ -44,6 +44,7 @@ A `.json` file stored next to an audio file (same stem, e.g. `clip.wav` + `clip.
 - The **fields** pill opens a searchable browser of every field present in the loaded files
 - Drag the divider (or double-click to reset) to resize the panel width
 - A **JSON** toolbar checkbox toggles all metadata panels on/off. Unpaired `.json` files (no matching audio) appear as their own **standalone JSON cards** while the toggle is on.
+- Metadata is fetched lazily: a paired `.json` is read once its audio has loaded, and `.json` files with no matching audio are loaded after audio loading settles.
 
 ### Multichannel Playback
 

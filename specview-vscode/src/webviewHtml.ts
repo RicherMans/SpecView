@@ -34,7 +34,7 @@ export function getWebviewHtml(
   <span class="spacer"></span>
   <div class="vol-group">
     <label>Vol</label>
-    <input type="range" class="vol-slider" id="vol-slider" min="0" max="100" value="80">
+    <input type="range" class="vol-slider" id="vol-slider" min="0" max="100" value="50">
   </div>
   <div class="sep"></div>
   <button class="btn" id="btn-zoom-in" disabled title="Zoom In (Shift+Up)">+</button>

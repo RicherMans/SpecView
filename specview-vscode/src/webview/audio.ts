@@ -3,11 +3,21 @@ import type { Track } from './types';
 let audioCtx: AudioContext;
 let gainNode: GainNode;
 
+/** Maximum master gain: 4.0 ≈ +12 dB, so quiet material can be boosted. */
+const GAIN_MAX = 4;
+
+/** Map a slider value in [0,1] to master gain (square curve).
+ *  0 → 0, 0.5 → 1.0 (unity), 1 → GAIN_MAX (+12 dB). */
+export function volumeGain(v: number): number {
+  const x = Math.min(1, Math.max(0, v));
+  return GAIN_MAX * x * x;
+}
+
 export function initAudio(): { audioCtx: AudioContext; gainNode: GainNode } {
   audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
   gainNode = audioCtx.createGain();
   gainNode.connect(audioCtx.destination);
-  gainNode.gain.value = 0.8;
+  gainNode.gain.value = volumeGain(0.5);
   (window as any).__audioCtx = audioCtx;
   return { audioCtx, gainNode };
 }
@@ -17,7 +27,9 @@ export function getAudioContext(): AudioContext {
 }
 
 export function setVolume(v: number): void {
-  if (gainNode) gainNode.gain.value = v;
+  if (!gainNode) return;
+  // Short time constant avoids clicks/zipper noise while dragging the slider.
+  gainNode.gain.setTargetAtTime(volumeGain(v), audioCtx.currentTime, 0.01);
 }
 
 /** Routing nodes created for a per-channel mute play, so stopSource can

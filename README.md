@@ -75,7 +75,7 @@ Or visit: https://marketplace.visualstudio.com/items?itemName=sunxingwei.specvie
 cd specview-vscode
 npm install && node esbuild.mjs
 npx @vscode/vsce package
-code --install-extension specview-0.2.1.vsix
+code --install-extension specview-0.2.2.vsix
 ```
 
 ### Additional Extension Features

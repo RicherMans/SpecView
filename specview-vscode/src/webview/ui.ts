@@ -1,6 +1,7 @@
 import type { Track, Group, DecodedItem, GroupResult, AnalysisSpan } from './types';
 import { SPEC_H, SPEC_H_DIFF, renderSpec, drawSpec, drawWaveform, getWaveformHeight, channelSpecHeight } from './spectrogram';
 import { TAG_CSS, stripExt, extractTag, groupByBaseName, getParentFolderName, parseNativeSampleRate } from './grouping';
+import { decodeMetaPathSegment, displayMetaPath, joinMetaPath, metaPathSegments } from './metaPath';
 import { playSource, stopSource, getPos, resumeAudio, decodeToAudioBuffer, applyChannelListen } from './audio';
 import { runAnalysis, runAnalysisGroup, renderAnalysisStrip } from './analysis';
 import { fmt, fmtShort, esc } from './util';
@@ -41,6 +42,17 @@ const metaMap = new Map<string, string>();  // metaKeyOf(name, filePath) -> raw 
 const metaSource = new Map<string, string>(); // metaKey -> source filePath (for cleanup)
 const metaTreeCache = new Map<string, string>();
 const metaLeafCache = new Map<string, Map<string, boolean>>();
+// Lazy JSON: descriptors received from the host, fetched only when needed.
+interface PendingMeta { name: string; filePath?: string; sourceId: string }
+const pendingMeta = new Map<string, PendingMeta>();
+const metaLoading = new Set<string>();
+// Keys of every known audio item (rendered, pending or recycled), so a JSON is
+// only treated as "unpaired" when no audio with that stem exists at all.
+const allAudioMetaKeys = new Set<string>();
+// Keys of audio items that have actually been decoded (loaded), including ones
+// that were later recycled. Used to pair a JSON once its audio has loaded.
+const loadedAudioKeys = new Set<string>();
+let metaUnpairedTimer: number | undefined;
 
 /** Paired-JSON key, mirroring the web implementation. */
 function metaKeyOf(name: string, filePath?: string): string {
@@ -95,7 +107,7 @@ export function setMetaVisible(v: boolean): void {
   for (const g of groups) {
     if (g.metaPanel) g.metaPanel.aside.classList.toggle('show', v);
   }
-  if (v) ensureStandaloneJsonCards();
+  if (v) { ensureStandaloneJsonCards(); markUnpairedMeta(); }
   setStandaloneJsonCardVisibility(v);
   scheduleReflow();
 }
@@ -106,6 +118,7 @@ const jsonCards: JsonCard[] = [];
 
 /** A meta key that is already "paired" to a loaded audio track. */
 function isMetaKeyPaired(key: string): boolean {
+  if (allAudioMetaKeys.has(key)) return true;
   for (const t of tracks) {
     if (metaKeyOf(t.name, t.filePath) === key || metaKeyOf(t.name) === key) return true;
   }
@@ -147,6 +160,98 @@ function ensureStandaloneJsonCards(): void {
     jsonCards.push({ key, filePath, name: base, card, panel });
   }
   setStandaloneJsonCardVisibility(metaVisible);
+}
+
+/** Register lazy JSON descriptors. Nothing is read until an audio track with
+ *  the same stem finishes loading, or the unpaired pass runs. */
+export function receiveMetaURIs(files: { name: string; filePath?: string; sourceId: string }[]): void {
+  for (const file of files) {
+    const key = metaKeyOf(file.name, file.filePath);
+    if (!key || metaMap.has(key) || pendingMeta.has(key)) continue;
+    pendingMeta.set(key, { name: file.name, filePath: file.filePath, sourceId: file.sourceId });
+    // Already-decoded tracks never trigger loadTrack again — pair immediately.
+    if (loadedAudioKeys.has(key) || tracks.some(t => t.loaded && metaKeyOf(t.name, t.filePath) === key)) {
+      fetchPendingMeta(key);
+    }
+  }
+  markUnpairedMeta();
+}
+
+function audioKeyOf(item: { name: string; filePath?: string }): string {
+  return metaKeyOf(item.name, item.filePath);
+}
+
+/** Rebuild the sets of known / loaded audio keys from live + pending + recycled
+ *  items. Called after audio is removed so its JSON can fall back to standalone. */
+function refreshAudioMetaIndex(): void {
+  allAudioMetaKeys.clear();
+  loadedAudioKeys.clear();
+  for (const item of collectAllItems()) {
+    const key = audioKeyOf(item);
+    allAudioMetaKeys.add(key);
+    if (item.buffer) loadedAudioKeys.add(key);
+  }
+  ensureStandaloneJsonCards();
+  markUnpairedMeta();
+}
+
+/** Fetch a pending JSON by key and fold its text into metaMap / the panels. */
+function fetchPendingMeta(key: string): void {
+  const file = pendingMeta.get(key);
+  if (!file || metaLoading.has(key)) return;
+  metaLoading.add(key);
+  const requestFileData = (window as any).__requestFileData as ((sourceId: string) => Promise<ArrayBuffer>) | undefined;
+  if (!requestFileData) { metaLoading.delete(key); return; }
+  void requestFileData(file.sourceId).then(raw => {
+    if (!pendingMeta.has(key)) return;
+    pendingMeta.delete(key);
+    const text = new TextDecoder('utf-8').decode(raw).replace(/\0+$/g, '');
+    receiveMetaData([{ name: file.name, filePath: file.filePath, text }]);
+  }).catch(error => {
+    console.error('[SpecView] Failed to load JSON:', file.name, error);
+  }).finally(() => {
+    metaLoading.delete(key);
+  });
+}
+
+/** Read the JSON paired with a just-loaded audio track. */
+function requestMetaForTrack(t: Track): void {
+  const key = metaKeyOf(t.name, t.filePath);
+  if (key && pendingMeta.has(key)) fetchPendingMeta(key);
+}
+
+/** Record that a track's audio is decoded and pull its pending JSON. Safe to
+ *  call repeatedly (e.g. on create and on recycle/restore). */
+function markAudioLoaded(t: Track): void {
+  const key = metaKeyOf(t.name, t.filePath);
+  if (key) loadedAudioKeys.add(key);
+  requestMetaForTrack(t);
+}
+
+/** Once audio loading settles, read JSON with no matching audio at all. */
+function markUnpairedMeta(): void {
+  if (metaUnpairedTimer !== undefined) clearTimeout(metaUnpairedTimer);
+  metaUnpairedTimer = window.setTimeout(() => {
+    metaUnpairedTimer = undefined;
+    loadUnpairedMeta();
+  }, 300);
+}
+
+function loadUnpairedMeta(): void {
+  if (loadingInFlight()) { markUnpairedMeta(); return; }
+  if (!metaVisible) return;
+  let started = false;
+  for (const key of pendingMeta.keys()) {
+    if (allAudioMetaKeys.has(key) || metaLoading.has(key)) continue;
+    fetchPendingMeta(key);
+    started = true;
+  }
+  if (started) ensureStandaloneJsonCards();
+}
+
+/** True while any audio track is currently decoding/lazy-loading. */
+function loadingInFlight(): boolean {
+  return activeLoadTokens.size > 0 || loadQueue.length > 0 || tracks.some(t => t._loading);
 }
 
 /** Toggle standalone JSON card visibility (keep DOM, just hide like .meta-aside). */
@@ -337,7 +442,7 @@ function refreshMetaBodies(): void {
 
 function selectedValue(parsed: unknown, path: string): unknown {
   let cur: any = parsed;
-  for (const part of path.split('.')) {
+  for (const part of metaPathSegments(path)) {
     if (cur == null) return undefined;
     if (Array.isArray(cur)) { const i = Number(part); if (!Number.isNaN(i)) cur = cur[i]; else return undefined; }
     else if (typeof cur === 'object') cur = cur[part];
@@ -398,7 +503,7 @@ function renderTreeInto(v: unknown, depth: number, out: string[], prefix: string
   if (Array.isArray(v)) {
     if (v.length === 0) { out.push(lineHtml(depth, '<span class="jv-punc">[]</span>')); return; }
     for (let i = 0; i < v.length; i++) {
-      const p = prefix ? prefix + '.' + i : String(i);
+      const p = joinMetaPath(prefix, String(i));
       out.push(lineHtml(depth, '<span class="jv-punc">' + i + ':</span>'));
       renderTreeInto(v[i], depth + 1, out, p);
     }
@@ -407,20 +512,20 @@ function renderTreeInto(v: unknown, depth: number, out: string[], prefix: string
   const keys = Object.keys(v);
   if (keys.length === 0) { out.push(lineHtml(depth, '<span class="jv-punc">{}</span>')); return; }
   for (const k of keys) {
-    const p = prefix ? prefix + '.' + k : k;
+    const p = joinMetaPath(prefix, k);
     const val = (v as Record<string, unknown>)[k];
     if (val !== null && typeof val === 'object' || (typeof val === 'string' && ((val as string).trim().startsWith('{') || (val as string).trim().startsWith('[')) && val.length < 200000)) {
       if (typeof val === 'string') {
         try { val && renderTreeInto(JSON.parse(val as string), depth, out, p); continue; }
         catch { /* fallthrough literal */ }
       }
-      out.push(lineHtml(depth, '<span class="js-meta-key' + metaKeyStateCls(p) + '" data-path="' + escAttr(p) + '" title="Select field ' + escAttr(p) + '">' + k + '</span>' + ' <span class="jv-punc">{…}</span>'));
+      out.push(lineHtml(depth, '<span class="js-meta-key' + metaKeyStateCls(p) + '" data-path="' + escAttr(p) + '" title="Select field ' + escAttr(displayMetaPath(p)) + '">' + escMetaText(k) + '</span>' + ' <span class="jv-punc">{…}</span>'));
       renderTreeInto(val, depth + 1, out, p);
       continue;
     }
     const keyCls = 'jv-key js-meta-key' + metaKeyStateCls(p);
     out.push(lineHtml(depth,
-      '<span class="' + keyCls + '" data-path="' + escAttr(p) + '" title="Select field ' + escAttr(p) + '">' + k + '</span>' +
+      '<span class="' + keyCls + '" data-path="' + escAttr(p) + '" title="Select field ' + escAttr(displayMetaPath(p)) + '">' + escMetaText(k) + '</span>' +
       '<span class="jv-punc">:</span> <span class="jv-str-ish">' + jsonScalarHtml(val) + '</span>'));
   }
 }
@@ -456,7 +561,7 @@ function metaBodyHtml(meta: string | null | undefined): string {
   const parts: string[] = [];
   const paths = Array.from(metaSelPaths).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
   for (const p of paths) {
-    parts.push('<div class="meta-sel"><span class="meta-sel-lbl js-meta-key" data-path="' + escAttr(p) + '">' + escMetaText(p) + '</span>' +
+    parts.push('<div class="meta-sel"><span class="meta-sel-lbl js-meta-key" data-path="' + escAttr(p) + '">' + escMetaText(displayMetaPath(p)) + '</span>' +
       '<div class="meta-sel-val">' + metaValueHtml(parsed, p) + '</div></div>');
   }
   return parts.join('');
@@ -497,9 +602,9 @@ function discoverMetaFields(): Map<string, number> {
     try { parsed = JSON.parse(raw); } catch { return; }
     const walk = (v: unknown, prefix: string) => {
       if (!v || typeof v !== 'object') return;
-      if (Array.isArray(v)) { v.forEach((x, i) => walk(x, prefix ? prefix + '.' + i : String(i))); return; }
+      if (Array.isArray(v)) { v.forEach((x, i) => walk(x, joinMetaPath(prefix, String(i)))); return; }
       for (const k of Object.keys(v)) {
-        const p = prefix ? prefix + '.' + k : k;
+        const p = joinMetaPath(prefix, k);
         m.set(p, (m.get(p) || 0) + 1);
         walk((v as Record<string, unknown>)[k], p);
       }
@@ -515,7 +620,7 @@ function discoverMetaFields(): Map<string, number> {
 // ---- field tree (hierarchical, leaf-based selection) ----
 interface FieldNode {
   name: string;           // display segment ("stats" / "[0]")
-  path: string;           // full dotted path ('' for the root)
+  path: string;           // full JSON Pointer path ('' for the root)
   count: number;          // number of loaded files containing this path
   children: FieldNode[];
   leaves: string[];       // all leaf paths beneath this node (self if leaf)
@@ -538,9 +643,9 @@ function buildFieldTree(): FieldNode {
   const ensure = (path: string): FieldNode => {
     const hit = byPath.get(path);
     if (hit) return hit;
-    const parts = path.split('.');
-    const last = parts[parts.length - 1];
-    const parent = ensure(parts.slice(0, -1).join('.'));
+    const slash = path.lastIndexOf('/');
+    const last = decodeMetaPathSegment(path.slice(slash + 1));
+    const parent = ensure(slash > 0 ? path.slice(0, slash) : '');
     const node: FieldNode = {
       name: /^\d+$/.test(last) ? '[' + last + ']' : last,
       path, count: 0, children: [], leaves: [],
@@ -586,14 +691,12 @@ function toggleFieldNode(node: FieldNode): void {
 }
 
 function findFieldNode(root: FieldNode, path: string): FieldNode | null {
-  if (!path) return root;
-  let cur = root;
-  for (const part of path.split('.')) {
-    const next = cur.children.find(c => c.path === (cur.path ? cur.path + '.' + part : part));
-    if (!next) return null;
-    cur = next;
+  if (root.path === path) return root;
+  for (const child of root.children) {
+    const found = findFieldNode(child, path);
+    if (found) return found;
   }
-  return cur;
+  return null;
 }
 
 /** Toggle a field path (from a JSON body key). Non-leaf nodes cascade to their
@@ -726,10 +829,18 @@ function metaElNearViewport(el: HTMLElement | null): boolean {
   return !(er.bottom < box.top - 600 || er.top > box.bottom + 600);
 }
 
-// Lazy loading observer with concurrency limit
-const MAX_CONCURRENT_LOADS = 3;
-let activeLoads = 0;
+// Lazy loading: one decode at a time; cards are loaded only while visible.
+const MAX_CONCURRENT_LOADS = 1;
+const activeLoadTokens = new Set<symbol>();
 const loadQueue: Track[] = [];
+let lazyObserver: IntersectionObserver;
+
+function isTrackVisible(t: Track): boolean {
+  if (!t.el?.isConnected) return false;
+  const card = t.el.getBoundingClientRect();
+  const box = tracksBox.getBoundingClientRect();
+  return card.bottom > box.top && card.top < box.bottom;
+}
 
 function enqueueLoad(t: Track): void {
   if (t.loaded || t._loading) return;
@@ -738,43 +849,19 @@ function enqueueLoad(t: Track): void {
 }
 
 function drainLoadQueue(): void {
-  while (activeLoads < MAX_CONCURRENT_LOADS && loadQueue.length > 0) {
+  while (activeLoadTokens.size < MAX_CONCURRENT_LOADS && loadQueue.length > 0) {
     const t = loadQueue.shift()!;
     if (t.loaded || t._loading || !isTrackAlive(t)) continue;
-    activeLoads++;
+    if (!isTrackVisible(t)) continue; // dropped; the observer re-queues on re-entry
+    const token = Symbol('track-load');
+    activeLoadTokens.add(token);
     loadTrack(t).finally(() => {
-      // Guard: only decrement if still positive. After clearAll() force-resets
-      // activeLoads to 0, stale in-flight completions must not push it negative.
-      if (activeLoads > 0) activeLoads--;
+      activeLoadTokens.delete(token);
       drainLoadQueue();
+      if (activeLoadTokens.size === 0 && loadQueue.length === 0) markUnpairedMeta();
     });
   }
 }
-
-const lazyObserver = new IntersectionObserver(
-  (entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      const card = entry.target as HTMLElement;
-      lazyObserver.unobserve(card);
-      const trackId = card.dataset.trackId;
-      const groupId = card.dataset.groupId;
-      if (trackId) {
-        const t = tracks.find(tr => tr.id === Number(trackId));
-        if (t && !t.loaded) enqueueLoad(t);
-      } else if (groupId) {
-        const g = groups.find(gr => gr.id === Number(groupId));
-        if (g) {
-          for (const tid of g.trackIds) {
-            const t = tracks.find(tr => tr.id === tid);
-            if (t && !t.loaded) enqueueLoad(t);
-          }
-        }
-      }
-    }
-  },
-  { rootMargin: '800px' }
-);
 
 export function getTracks(): Track[] { return tracks; }
 export function getGroups(): Group[] { return groups; }
@@ -807,9 +894,10 @@ function rebuildBodyAsMulti(t: Track): void {
   ensureChannelViews(t, expandChannelCount(t));
   const body = buildSpecBody(t, SPEC_H);
   if (old && old.parentNode) {
-    if (ruler && ruler.parentNode === card) card.insertBefore(body, ruler);
-    else if (old.nextSibling) card.insertBefore(body, old.nextSibling);
-    else card.appendChild(body);
+    const parent = old.parentNode;
+    if (ruler && ruler.parentNode === parent) parent.insertBefore(body, ruler);
+    else if (old.nextSibling) parent.insertBefore(body, old.nextSibling);
+    else parent.appendChild(body);
     old.remove();
   } else if (ruler && ruler.parentNode === card) {
     card.insertBefore(body, ruler);
@@ -825,6 +913,7 @@ function rebuildBodyAsMulti(t: Track): void {
 function splitMultiOutOfGroup(t: Track): boolean {
   const g = groups.find(gr => gr.id === t.groupId);
   if (!g) return false;
+  const windowRec = renderedCards.find(record => record.elements.includes(g.el));
   const placeholder = document.createElement('div');
   if (g.el && g.el.parentNode === tracksBox) tracksBox.insertBefore(placeholder, g.el);
   const gid = g.id;
@@ -847,8 +936,9 @@ function splitMultiOutOfGroup(t: Track): boolean {
     }
   }
   if (placeholder.parentNode) placeholder.remove();
-  // The removed group card may have been tracked by the windowed list.
-  pruneRendered();
+  // Keep the windowed list in sync with the newly created cards.
+  if (windowRec) updateWindowRecord(windowRec, els.filter((el): el is HTMLElement => !!el));
+  else pruneRendered();
   fixActiveTrack();
   refreshUI();
   // Trigger render for a freshly created multichannel standalone.
@@ -953,6 +1043,7 @@ async function loadTrack(t: Track): Promise<void> {
     // Update card info text
     updateCardInfo(t);
     updateRuler(t);
+    markAudioLoaded(t);
   } catch (e) {
     console.error('Failed to load track:', t.name, e);
     const loading = t.el?.querySelector('.loading-overlay') as HTMLElement;
@@ -1991,6 +2082,7 @@ function createStandalone(name: string, buffer: AudioBuffer | null, nativeSR: nu
   if (!activeTrackId) activeTrackId = t.id;
 
   if (t.loaded) {
+    markAudioLoaded(t);
     requestAnimationFrame(() => { if (t._pendingRender) { t._pendingRender(); t._pendingRender = null; } });
   } else {
     lazyObserver.observe(card);
@@ -2085,6 +2177,7 @@ function createDiffGroup(baseName: string, items: DecodedItem[]): HTMLElement {
   setMetaBody(panel.body, activeLane ? activeLane.meta : null);
   if (metaVisible) panel.aside.classList.add('show');
 
+  for (const t of grpTracks) if (t.loaded) markAudioLoaded(t);
   if (grpTracks.some(t => t.loaded)) {
     requestAnimationFrame(() => {
       for (const t of grpTracks) {
@@ -2107,19 +2200,22 @@ function addToDiffGroup(grp: Group, newItem: DecodedItem): HTMLElement {
     return { name: t.name, buffer: t.buffer, suffix, nativeSR: t.nativeSR, filePath: t.filePath, lazyUri: t.lazyUri } as DecodedItem;
   }).filter(Boolean) as DecodedItem[];
 
+  const windowRec = renderedCards.find(record => record.elements.includes(grp.el));
   const ph = insertPlaceholderBefore(grp.el);
   removeDiffGroupQuietly(grp.id);
   existingItems.push(newItem);
   const el = createDiffGroup(grp.baseName, existingItems);
   placeCardAtPosition(ph);
+  if (windowRec) updateWindowRecord(windowRec, [el]);
+  else pruneRendered();
   return el;
 }
 
 function notifyRemoveFromLoaded(t: Track): void {
-  if (t.filePath) {
+  if (t.lazyUri) {
+    (window as any).__vscodePostMessage({ type: 'removeFromLoaded', sourceId: t.lazyUri });
+  } else if (t.filePath) {
     (window as any).__vscodePostMessage({ type: 'removeFromLoaded', filePath: t.filePath });
-  } else if (t.lazyUri && !t.lazyUri.startsWith('tar:')) {
-    (window as any).__vscodePostMessage({ type: 'removeFromLoaded', uri: t.lazyUri });
   }
 }
 
@@ -2130,8 +2226,10 @@ function removeTrack(id: number): void {
   if (t.playing) stopSource(t);
   if (t.groupId != null) { removeDiffGroup(t.groupId); return; }
   notifyRemoveFromLoaded(t);
-  if (t.el) t.el.remove();
+  if (t.el) { lazyObserver.unobserve(t.el); t.el.remove(); }
   tracks.splice(i, 1);
+  pruneRendered();
+  refreshAudioMetaIndex();
   if (activeTrackId === id) activeTrackId = tracks.length ? tracks[0].id : null;
   refreshUI();
 }
@@ -2148,8 +2246,11 @@ function removeDiffGroup(gid: number): void {
       tracks.splice(ti, 1);
     }
   }
+  lazyObserver.unobserve(grp.el);
   grp.el.remove();
   groups.splice(gi, 1);
+  pruneRendered();
+  refreshAudioMetaIndex();
   if (activeTrackId && !tracks.find(t => t.id === activeTrackId))
     activeTrackId = tracks.length ? tracks[0].id : null;
   refreshUI();
@@ -2170,6 +2271,7 @@ function deleteTrackFromGroup(trackId: number): void {
 
   const g = groups.find(gr => gr.id === t.groupId);
   if (!g) { removeTrack(t.id); return; }
+  const windowRec = renderedCards.find(record => record.elements.includes(g.el));
 
   // Use placeholder to preserve card position in DOM
   const placeholder = document.createElement('div');
@@ -2216,6 +2318,9 @@ function deleteTrackFromGroup(trackId: number): void {
     tracksBox.insertBefore(newCard, placeholder);
   }
   placeholder.remove();
+  if (windowRec && newCard instanceof HTMLElement) updateWindowRecord(windowRec, [newCard]);
+  else pruneRendered();
+  refreshAudioMetaIndex();
 
   refreshUI();
 }
@@ -2287,6 +2392,7 @@ function groupItems(items: DecodedItem[]): GroupResult[] {
 }
 
 export function handleFiles(items: DecodedItem[]): (HTMLElement | null)[] {
+  for (const item of items) allAudioMetaKeys.add(audioKeyOf(item));
   const els: (HTMLElement | null)[] = [];
   const rest: DecodedItem[] = [];
   for (const it of items) {
@@ -2396,14 +2502,14 @@ export function handleFiles(items: DecodedItem[]): (HTMLElement | null)[] {
  * far above the viewport are recycled (released) and restored on scroll-up, so
  * the DOM stays small regardless of how many files the user scrolls through.
  * ========================================================================== */
-const INITIAL_RENDER = 10;
-const SCROLL_BATCH = 30;
-const MAX_RENDERED = 500;
+const INITIAL_RENDER = 4;
+const SCROLL_BATCH = 4;
+const MAX_RENDERED = 12;
 const REGROUP_CHUNK = 4;      // diff-group cards materialized per frame during grouping toggle
 const REGROUP_PAUSE = 0;      // ms between chunks (yields main thread)
 
 interface WindowGroup { baseName: string; items: DecodedItem[]; }
-interface WindowRec { group: WindowGroup; el: HTMLElement | null; }
+interface WindowRec { group: WindowGroup; elements: HTMLElement[]; restoreBefore?: WindowRec; }
 
 let pendingGroups: WindowGroup[] = [];
 let renderedCards: WindowRec[] = [];
@@ -2425,16 +2531,48 @@ function cardElConnected(el: HTMLElement | null): boolean {
 }
 
 function recTracks(r: WindowRec): Track[] {
-  if (!r.el) return [];
-  const g = groups.find(gr => gr.el === r.el);
-  if (g) return g.trackIds.map(id => tracks.find(t => t.id === id)).filter(Boolean) as Track[];
-  const t = tracks.find(tr => tr.el === r.el);
-  return t ? [t] : [];
+  const result: Track[] = [];
+  for (const el of r.elements) {
+    const g = groups.find(gr => gr.el === el);
+    if (g) {
+      result.push(...(g.trackIds.map(id => tracks.find(t => t.id === id)).filter(Boolean) as Track[]));
+      continue;
+    }
+    const t = tracks.find(tr => tr.el === el);
+    if (t) result.push(t);
+  }
+  return result;
 }
 
 function isPinnedRec(r: WindowRec): boolean {
-  if (!cardElConnected(r.el)) return true;
   return recTracks(r).some(t => t.playing || (t.analysisResults && t.analysisResults.length > 0));
+}
+
+/** Rebuild a window record's group metadata from its (live) cards. */
+function itemFromTrack(t: Track): DecodedItem {
+  return {
+    name: itemBaseName(t), buffer: t.buffer || null, nativeSR: t.nativeSR,
+    filePath: t.filePath, lazyUri: t.lazyUri,
+  };
+}
+
+function updateWindowRecord(record: WindowRec, elements: HTMLElement[]): void {
+  record.elements = Array.from(new Set(elements.filter(cardElConnected)));
+  const recordTracks = recTracks(record);
+  if (recordTracks.length) {
+    record.group = {
+      baseName: recordTracks.length === 1
+        ? itemBaseName(recordTracks[0])
+        : (groups.find(group => record.elements.includes(group.el))?.baseName || record.group.baseName),
+      items: recordTracks.map(itemFromTrack),
+    };
+  }
+}
+
+function makeWindowRecord(group: WindowGroup, elements: (HTMLElement | null)[]): WindowRec {
+  const record: WindowRec = { group, elements: elements.filter((el): el is HTMLElement => !!el) };
+  updateWindowRecord(record, record.elements);
+  return record;
 }
 
 function fixActiveTrack(): void {
@@ -2450,15 +2588,22 @@ function removeCardByEl(el: HTMLElement): void {
 
 /* Drop window records whose card was merged away into another card. */
 function pruneRendered(): void {
-  renderedCards = renderedCards.filter(r => cardElConnected(r.el));
+  for (const record of renderedCards) updateWindowRecord(record, record.elements);
+  renderedCards = renderedCards.filter(record => record.elements.length > 0);
+}
+
+function renderedElementCount(): number {
+  return renderedCards.reduce((count, record) => count + record.elements.length, 0);
 }
 
 function recycleTop(): void {
-  while (renderedCards.length > MAX_RENDERED) {
-    const r = renderedCards.shift()!;
-    if (isPinnedRec(r)) { renderedCards.unshift(r); break; }
-    removeCardByEl(r.el!);
-    r.el = null;
+  while (renderedElementCount() > MAX_RENDERED) {
+    const index = renderedCards.findIndex(record => !isPinnedRec(record));
+    if (index < 0) break;
+    const [r] = renderedCards.splice(index, 1);
+    r.restoreBefore = renderedCards[index];
+    for (const el of r.elements.slice()) removeCardByEl(el);
+    r.elements = [];
     releasedTop.push(r);
   }
   fixActiveTrack();
@@ -2491,9 +2636,9 @@ function updateSentinels(): void {
   }
   if (releasedTop.length) {
     if (!topSentinelEl) { topSentinelEl = makeSentinel(); topObserver!.observe(topSentinelEl); }
-    const firstCard = renderedCards.find(r => cardElConnected(r.el));
-    const anchor = (firstCard && firstCard.el) || (tracksBox.firstChild as HTMLElement | null);
-    tracksBox.insertBefore(topSentinelEl, anchor);
+    const firstCard = renderedCards.flatMap(record => record.elements).find(cardElConnected);
+    const anchor = firstCard || (tracksBox.firstChild as HTMLElement | null);
+    if (!anchor || anchor.parentNode === tracksBox) tracksBox.insertBefore(topSentinelEl, anchor);
   } else if (topSentinelEl) {
     topObserver!.unobserve(topSentinelEl);
     topSentinelEl.remove();
@@ -2506,8 +2651,7 @@ function renderWindow(count: number): void {
   while (count-- > 0 && pendingGroups.length) {
     const g = pendingGroups.shift()!;
     const els = handleFiles(g.items);
-    const el = (els && els[0]) || null;
-    renderedCards.push({ group: g, el });
+    renderedCards.push(makeWindowRecord(g, els));
   }
   pruneRendered();
   recycleTop();
@@ -2518,35 +2662,43 @@ function renderWindow(count: number): void {
 function restoreTop(count: number): void {
   while (count-- > 0 && releasedTop.length) {
     const r = releasedTop.pop()!;
-    const anchorRec = renderedCards.find(c => cardElConnected(c.el));
-    const anchor = (anchorRec && anchorRec.el) || null;
+    const insertionIndex = r.restoreBefore ? renderedCards.indexOf(r.restoreBefore) : renderedCards.length;
+    const safeIndex = insertionIndex >= 0 ? insertionIndex : renderedCards.length;
+    const anchor = renderedCards[safeIndex]?.elements.find(cardElConnected) || null;
     const els = handleFiles(r.group.items);
-    r.el = (els && els[0]) || null;
-    renderedCards.unshift(r);
-    if (cardElConnected(r.el) && anchor && cardElConnected(anchor) && r.el !== anchor && anchor.parentNode === tracksBox && r.el!.parentNode === tracksBox) {
-      tracksBox.insertBefore(r.el!, anchor);
+    updateWindowRecord(r, els.filter((el): el is HTMLElement => !!el));
+    renderedCards.splice(safeIndex, 0, r);
+    r.restoreBefore = undefined;
+    if (anchor && cardElConnected(anchor) && anchor.parentNode === tracksBox) {
+      for (const el of r.elements) {
+        if (el !== anchor && el.parentNode === tracksBox) tracksBox.insertBefore(el, anchor);
+      }
     }
   }
+  pruneRendered();
   /* keep the window bounded: overflow at the bottom is re-queued */
-  while (renderedCards.length > MAX_RENDERED) {
-    const r = renderedCards.pop()!;
-    if (r.el && r.el.isConnected) removeCardByEl(r.el);
-    r.el = null;
+  while (renderedElementCount() > MAX_RENDERED) {
+    let index = renderedCards.length - 1;
+    while (index >= 0 && isPinnedRec(renderedCards[index])) index--;
+    if (index < 0) break;
+    const [r] = renderedCards.splice(index, 1);
+    for (const el of r.elements.slice()) if (el.isConnected) removeCardByEl(el);
+    r.elements = [];
     pendingGroups.unshift(r.group);
   }
   fixActiveTrack();
   updateSentinels();
 }
 
-export function handleFileURIs(files: { name: string; uri: string }[]): void {
-  // Convert lazy URIs to DecodedItems, then (re)group the whole pending set so
-  // A/B pairs that share a stem are kept together for diff grouping.
+export function handleFileURIs(files: { name: string; filePath?: string; sourceId?: string; uri?: string }[]): void {
+  // Convert lazy sources to DecodedItems, then (re)group the whole pending set
+  // so A/B pairs that share a stem are kept together for diff grouping.
   const newItems: DecodedItem[] = files.map(f => ({
     name: f.name,
     buffer: null,
     nativeSR: 0,
-    filePath: f.uri,   // URI string used for directory-based grouping
-    lazyUri: f.uri,
+    filePath: f.filePath ?? f.uri,   // full path for directory-based grouping
+    lazyUri: f.sourceId ?? f.uri,    // opaque source ID for on-demand loading
   }));
   if (autoGroup) {
     const combined = pendingGroups.flatMap(g => g.items).concat(newItems);
@@ -2556,8 +2708,11 @@ export function handleFileURIs(files: { name: string; uri: string }[]): void {
     // ever merges into a diff group.
     pendingGroups = pendingGroups.concat(newItems.map(f => ({ baseName: f.name, items: [f] })));
   }
-  renderWindow(INITIAL_RENDER);
-  updateSentinels();
+  for (const item of newItems) allAudioMetaKeys.add(audioKeyOf(item));
+  if (renderedCards.length === 0) renderWindow(INITIAL_RENDER);
+  else updateSentinels();
+  ensureStandaloneJsonCards();
+  markUnpairedMeta();
 }
 
 export function clearAll(): void {
@@ -2577,9 +2732,14 @@ export function clearAll(): void {
   metaSource.clear();
   metaTreeCache.clear();
   metaLeafCache.clear();
+  pendingMeta.clear();
+  metaLoading.clear();
+  allAudioMetaKeys.clear();
+  loadedAudioKeys.clear();
+  if (metaUnpairedTimer !== undefined) { clearTimeout(metaUnpairedTimer); metaUnpairedTimer = undefined; }
   invalidateFieldContent();
   loadQueue.length = 0;
-  activeLoads = 0;
+  activeLoadTokens.clear();
   lazyObserver.disconnect();
   if (sentinelEl) { sentinelObserver!.unobserve(sentinelEl); sentinelEl = null; }
   if (topSentinelEl) { topObserver!.unobserve(topSentinelEl); topSentinelEl = null; }
@@ -2591,16 +2751,11 @@ export function clearAll(): void {
  *  have rewritten t.name to a relative path for cross-directory display. */
 function itemBaseName(t: Track): string {
   if (!t.filePath) return t.name;
-  if (t.filePath.startsWith('tar:')) {
-    // tar format: "tar:archivePath\ninternalName"
-    const nlIdx = t.filePath.indexOf('\n');
-    if (nlIdx >= 0) {
-      const internalName = t.filePath.substring(nlIdx + 1);
-      return internalName.split('/').pop() || t.name;
-    }
-    return t.name;
-  }
-  const normalized = t.filePath.replace(/\\/g, '/');
+  // Archive logical paths are `${archivePath}\n${entry}`; the basename is the
+  // last path segment of the entry, not of the archive path.
+  const nlIdx = t.filePath.indexOf('\n');
+  const logical = nlIdx >= 0 ? t.filePath.slice(nlIdx + 1) : t.filePath;
+  const normalized = logical.replace(/\\/g, '/');
   return normalized.substring(normalized.lastIndexOf('/') + 1) || t.name;
 }
 
@@ -2663,6 +2818,33 @@ function sortItems(items: DecodedItem[]): DecodedItem[] {
   return items.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
+/** Rebuild window records from the current DOM after an in-place regrouping that
+ *  replaced cards, so recycling/restoring keeps mapping to live elements. */
+function syncRenderedWindowRecords(): void {
+  const managed = new Set(renderedCards.flatMap(record => record.group.items)
+    .map(item => item.lazyUri || item.filePath || item.name));
+  if (!managed.size) return;
+  const records: WindowRec[] = [];
+  for (const node of Array.from(tracksBox.children)) {
+    const el = node as HTMLElement;
+    if (!el.classList.contains('card') || el.classList.contains('json-card')) continue;
+    const cardTracks = (() => {
+      const group = groups.find(candidate => candidate.el === el);
+      if (group) return group.trackIds.map(id => tracks.find(track => track.id === id)).filter(Boolean) as Track[];
+      const track = tracks.find(candidate => candidate.el === el);
+      return track ? [track] : [];
+    })();
+    if (!cardTracks.length) continue;
+    if (!cardTracks.some(track => managed.has(track.lazyUri || track.filePath || track.name))) continue;
+    const group = groups.find(candidate => candidate.el === el);
+    records.push(makeWindowRecord({
+      baseName: group?.baseName || itemBaseName(cardTracks[0]),
+      items: cardTracks.map(itemFromTrack),
+    }, [el]));
+  }
+  renderedCards = records;
+}
+
 /** off → on: re-join currently-visible standalone cards into diff groups *in
  *  place* (the mirror of splitAllGroups). Cards are never cleared or rebuilt as
  *  a whole: only members of a stem that forms a group are removed from their
@@ -2711,6 +2893,9 @@ function rebuildAll(): void {
   const finish = (): void => {
     alive = false;
     groupingBusy = false;
+    syncRenderedWindowRecords();
+    recycleTop();
+    updateSentinels();
     refreshUI();
     updateGroupingUI();
   };
@@ -2762,6 +2947,9 @@ function splitAllGroups(): void {
   const finish = (): void => {
     alive = false;
     groupingBusy = false;
+    syncRenderedWindowRecords();
+    recycleTop();
+    updateSentinels();
     refreshUI();
     updateGroupingUI();
   };
@@ -2832,12 +3020,36 @@ export function initUI(): void {
 
   btnGrouping.addEventListener('click', toggleAutoGroup);
 
+  // Lazy audio is loaded only while its card is inside the scroll viewport.
+  lazyObserver = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      const card = entry.target as HTMLElement;
+      const trackId = card.dataset.trackId;
+      const groupId = card.dataset.groupId;
+      const cardTracks = trackId
+        ? tracks.filter(track => track.id === Number(trackId))
+        : groups.find(group => group.id === Number(groupId))?.trackIds
+          .map(id => tracks.find(track => track.id === id)).filter(Boolean) as Track[] | undefined;
+      if (!cardTracks) continue;
+      if (entry.isIntersecting) {
+        for (const track of cardTracks) if (!track.loaded) enqueueLoad(track);
+      } else {
+        for (const track of cardTracks) {
+          if (!track._loading) {
+            const index = loadQueue.findIndex(queued => queued.id === track.id);
+            if (index >= 0) loadQueue.splice(index, 1);
+          }
+        }
+      }
+    }
+  }, { root: tracksBox, rootMargin: '0px', threshold: 0.01 });
+
   sentinelObserver = new IntersectionObserver(entries => {
     if (entries.some(e => e.isIntersecting)) renderWindow(SCROLL_BATCH);
-  }, { root: tracksBox, rootMargin: '2000px 0px' });
+  }, { root: tracksBox, rootMargin: '0px' });
   topObserver = new IntersectionObserver(entries => {
     if (entries.some(e => e.isIntersecting)) drainTop();
-  }, { root: tracksBox, rootMargin: '2000px 0px' });
+  }, { root: tracksBox, rootMargin: '0px' });
 
   // Meta width restore + interactions
   try { const saved = localStorage.getItem('specview-meta-width'); if (saved) document.documentElement.style.setProperty('--meta-width', saved); } catch { /* ignore */ }
