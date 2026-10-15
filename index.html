@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <title>SpecView - Spectrogram Player</title>
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
 <style>
 :root {
   --bg: #f0f0f0;
@@ -630,6 +629,8 @@ const DB_RANGE    = 90;     // dB dynamic range
    would amplify a few-LSB noise floor into a misleading full-scale spectrogram). */
 const FULL_SCALE_DB = 20 * Math.log10(FFT_SIZE / 4);
 const LAZY_THRESH = 10;     // ≥ this many files → lazy-load (decode on scroll into view)
+const EAGER_MAX_BYTES       = 8 << 20;   // per-file cap for eager (immediate) decode
+const EAGER_TOTAL_MAX_BYTES = 32 << 20;  // total cap for eager decode
 
 /* Windowed/virtualized card rendering: with huge archives we never build all
    cards at once. Only a small window is materialized into the DOM; a scroll
@@ -2163,7 +2164,9 @@ async function handleFiles(fileList, metaFiles) {
   const attach = f => meta.get(metaKeyOfFile(f)) || null;
 
   const DECODE_CONCURRENCY = 6;
-  if (audioFiles.length < LAZY_THRESH) {
+  const totalBytes = audioFiles.reduce((s, f) => s + (f.size || 0), 0);
+  const fitsEager = audioFiles.every(f => (f.size || 0) <= EAGER_MAX_BYTES);
+  if (audioFiles.length < LAZY_THRESH && fitsEager && totalBytes <= EAGER_TOTAL_MAX_BYTES) {
     /* ── EAGER PATH: decode in chunks of 6 to limit memory pressure ── */
     const batch = [];
     for (let i = 0; i < audioFiles.length; i += DECODE_CONCURRENCY) {
@@ -4759,18 +4762,38 @@ function isLikelyChina() {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Shanghai'; } catch(e) { return false; }
 }
 
-/* Configure ONNX Runtime WASM paths — use npmmirror in China */
-(function() {
-  if (typeof ort !== 'undefined') {
-    const wasmBase = isLikelyChina()
-      ? 'https://registry.npmmirror.com/onnxruntime-web/1.21.0/files/dist/'
-      : 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
-    ort.env.wasm.wasmPaths = wasmBase;
-    ort.env.wasm.numThreads = 1; /* avoid crossOriginIsolated requirement */
-  }
-})();
+/* Configure ONNX Runtime WASM paths — use npmmirror in China. Idempotent. */
+let ortConfigured = false;
+function configureOrt() {
+  if (ortConfigured || typeof ort === 'undefined') return;
+  ortConfigured = true;
+  const wasmBase = isLikelyChina()
+    ? 'https://registry.npmmirror.com/onnxruntime-web/1.21.0/files/dist/'
+    : 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
+  ort.env.wasm.wasmPaths = wasmBase;
+  ort.env.wasm.numThreads = 1; /* avoid crossOriginIsolated requirement */
+}
+
+/* Load the ONNX Runtime script on demand (first Analyze) instead of at page
+   load, so the ~1MB CDN script never blocks first paint for playback-only use. */
+const ORT_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js';
+let ortLoadPromise = null;
+function ensureOrt() {
+  if (typeof ort !== 'undefined') { configureOrt(); return Promise.resolve(); }
+  if (ortLoadPromise) return ortLoadPromise;
+  ortLoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = ORT_SCRIPT_URL;
+    s.async = true;
+    s.onload = () => { configureOrt(); resolve(); };
+    s.onerror = () => { ortLoadPromise = null; reject(new Error('Failed to load ONNX Runtime')); };
+    document.head.appendChild(s);
+  });
+  return ortLoadPromise;
+}
 
 async function loadCedModel() {
+  await ensureOrt();
   if (cedSession) return cedSession;
   if (cedLoading) {
     return new Promise(resolve => cedLoadCallbacks.push(resolve));
