@@ -178,6 +178,20 @@ body {
   display: flex;
   flex-direction: column;
 }
+.card-row.no-stretch { align-items: flex-start; }
+
+/* Standalone JSON card (unpaired .json shown on its own) */
+.json-card { overflow: auto; }
+.json-card .meta-aside {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  border-left: none;
+  border-top: 1px solid var(--border-light);
+  min-height: 220px;
+  max-height: 236px;
+}
+.json-card .meta-body { font-size: 12px; padding: 8px 10px; }
 .meta-aside {
   display: none;
   flex: 0 0 auto;
@@ -249,6 +263,7 @@ body.meta-sel .meta-clear { display: inline-block; }
 .js-meta-key:hover { background: #e3ecf9; }
 .meta-key-on { background: #d6e4f5; }
 .meta-key-on:hover { background: #c3d8f0; }
+.meta-key-partial { background: #eef4fb; color: #063d78; outline: 1px dashed #9cc0e8; outline-offset: -1px; }
 .jv-str  { color: #a31515; }
 .jv-num  { color: #098658; }
 .jv-bool { color: #0000ff; }
@@ -298,6 +313,20 @@ body.meta-sel .meta-clear { display: inline-block; }
 .mpo-count { flex: 0 0 auto; color: var(--text-dim); font-size: 10px; background: #ececef; padding: 0 6px; border-radius: 8px; }
 .mpo-foot { padding: 6px 10px; border-top: 1px solid var(--border-light); color: var(--text-sub); font-size: 10px; font-style: italic; }
 .mpo-empty { padding: 10px; color: var(--text-sub); font-size: 11px; }
+.mpo-all { border-bottom: 1px solid var(--border-light); margin-bottom: 4px; padding-bottom: 5px; font-weight: 600; }
+.mpo-node { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 1px 0; }
+.mpo-lbl { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; cursor: pointer; }
+.mpo-caret {
+  width: 12px; flex-shrink: 0; text-align: center; font-size: 8px;
+  color: var(--text-sub); cursor: pointer; user-select: none;
+}
+.mpo-caret-empty { cursor: default; visibility: hidden; }
+.mpo-node .mpo-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mpo-clear {
+  background: none; border: 1px solid var(--border); color: var(--text-dim);
+  font-size: 10px; padding: 2px 8px; border-radius: 3px; cursor: pointer;
+}
+.mpo-clear:hover { border-color: var(--accent); color: var(--accent); }
 
 .diff-badge {
   font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px; letter-spacing: 0.3px;
@@ -338,6 +367,36 @@ body.meta-sel .meta-clear { display: inline-block; }
   transition: color .12s; flex-shrink: 0;
 }
 .lane-remove:hover { color: var(--red); }
+
+/* ===== MULTICHANNEL LANES ===== */
+.ch-lane {
+  display: flex; flex-direction: column; border-bottom: 1px solid #2a2a2a;
+}
+.ch-lane:last-child { border-bottom: none; }
+.ch-label {
+  display: flex; align-items: center; gap: 6px; padding: 1px 8px;
+  background: #161616; border-bottom: 1px solid #2a2a2a; font-size: 9px;
+  color: var(--text-dim); flex-shrink: 0; height: 18px;
+}
+.ch-label.selected { background: rgba(138, 180, 248, 0.12); }
+.ch-tag {
+  font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+  color: #8ab4f8; font-size: 9px;
+}
+.ch-name {
+  color: var(--text-dim); font-size: 9px;
+  cursor: pointer; padding: 0 2px; border-radius: 3px;
+}
+.ch-name:hover { background: rgba(138, 180, 248, 0.15); }
+.ch-mute {
+  background: none; border: 1px solid #444; color: var(--text-dim);
+  font-size: 8px; font-weight: 700; line-height: 1;
+  padding: 1px 4px; border-radius: 3px; cursor: pointer;
+}
+.ch-mute:hover { border-color: #8ab4f8; color: #8ab4f8; }
+.ch-mute.on { background: #e74c3c; color: #fff; border-color: #e74c3c; }
+.ch-spacer { flex: 1; }
+
 .waveform-row { flex-shrink: 0; border-bottom: 1px solid #333; }
 .waveform-wrapper { position: relative; overflow: hidden; cursor: crosshair; }
 .waveform-wrapper canvas { display: block; width: 100%; }
@@ -520,7 +579,7 @@ body.playback .playhead, body.playback .wf-playhead {
   <span class="spacer"></span>
   <div class="vol-group">
     <label>Vol</label>
-    <input type="range" class="vol-slider" id="vol-slider" min="0" max="100" value="80">
+    <input type="range" class="vol-slider" id="vol-slider" min="0" max="100" value="50">
   </div>
   <div class="sep"></div>
   <button class="btn" id="btn-zoom-in" disabled title="Zoom In (Shift+Up)">+</button>
@@ -528,6 +587,8 @@ body.playback .playhead, body.playback .wf-playhead {
   <button class="btn" id="btn-zoom-fit" disabled title="Fit All (Shift+Left)">Fit</button>
   <div class="sep"></div>
   <button class="btn" id="btn-analyze-all" disabled>Analyze All</button>
+  <div class="sep"></div>
+  <button class="btn active" id="btn-grouping" title="Toggle automatic diff grouping">Grouping: On</button>
   <div class="sep"></div>
   <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap">
     <input type="checkbox" id="chk-waveform"> Waveform
@@ -560,6 +621,7 @@ body.playback .playhead, body.playback .wf-playhead {
 const FFT_SIZE    = 2048;
 const SPEC_H      = 220;
 const SPEC_H_DIFF = 180;
+const CH_SPEC_H   = 150;    // per-channel lane height for multichannel display
 const HOP_DIV     = 4;
 const DB_RANGE    = 90;     // dB dynamic range
 /* Absolute full-scale reference in this pipeline's dB units: a full-amplitude
@@ -633,6 +695,7 @@ const btnPlay   = document.getElementById('btn-play');
 const btnStop   = document.getElementById('btn-stop');
 const btnClear  = document.getElementById('btn-clear');
 const btnAnalyzeAll = document.getElementById('btn-analyze-all');
+const btnGrouping = document.getElementById('btn-grouping');
 const btnZoomIn = document.getElementById('btn-zoom-in');
 const btnZoomOut = document.getElementById('btn-zoom-out');
 const btnZoomFit = document.getElementById('btn-zoom-fit');
@@ -645,9 +708,17 @@ const volSlider = document.getElementById('vol-slider');
  *  STATE
  * ======================================================================== */
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+/* Master gain: square curve, unity at 50%, up to +12 dB (GAIN_MAX = 4) at full
+   scale so quiet material can be boosted. 0 → 0, 0.5 → 1.0, 1 → 4.0. */
+const GAIN_MAX = 4;
+function volumeGain(v) {
+  const x = Math.min(1, Math.max(0, v));
+  return GAIN_MAX * x * x;
+}
 const gainNode = audioCtx.createGain();
 gainNode.connect(audioCtx.destination);
-gainNode.gain.value = 0.8;
+gainNode.gain.value = volumeGain(0.5);
 
 let tracks = [], groups = [], nextId = 1, nextGrpId = 1;
 let activeTrackId = null, rafId = null;
@@ -656,8 +727,15 @@ let renderedCards = [];  /* descriptors currently in the DOM (in order) */
 let releasedTop = [];    /* descriptors recycled from the top (in order) */
 let sentinelEl = null, topSentinelEl = null;
 let metaVisible = false;   /* paired .json metadata panels on/off */
+let autoGroup = true;      /* automatic A/B diff grouping on/off */
+let groupingBusy = false;  /* guards the async regroup/split chunk loop */
+let clearEpoch = 0;        /* bumped by Clear All; stale async work bails out */
 
-volSlider.addEventListener('input', () => { gainNode.gain.value = volSlider.value / 100; });
+volSlider.addEventListener('input', () => {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  /* Short time constant avoids clicks/zipper noise while dragging. */
+  gainNode.gain.setTargetAtTime(volumeGain(volSlider.valueAsNumber / 100), audioCtx.currentTime, 0.01);
+});
 
 /* ========================================================================
  *  LAZY LOADING — IntersectionObserver + concurrency-limited queue
@@ -1082,6 +1160,15 @@ function monoTransferable(t) {
 /* Guarantee track.specData is filled. Uses the worker when available, else
    the original synchronous computeSpec(). Idempotent per track. */
 function ensureSpec(t) {
+  if (isMultiTrack(t)) {
+    /* Multichannel: one STFT per channel (inline; spec cached per buffer+ch). */
+    for (let i = 0; i < t.chViews.length; i++) {
+      restoreSpecCache(t, i);
+      const lane = t.chViews[i];
+      if (!lane.specData) computeSpec(t, lane.canvas ? lane.canvas.height : CH_SPEC_H, i);
+    }
+    return Promise.resolve();
+  }
   if (t.specData) return Promise.resolve();
   if (t._specPromise) return t._specPromise;
   const H = t.canvas && t.canvas.height ? t.canvas.height : SPEC_H;
@@ -1237,17 +1324,18 @@ function queueCardRender(job) {
 async function loadTrack(t) {
   if (t.loaded || t._loading || !t.file) return;
   t._loading = true;
+  const epoch = clearEpoch;   /* bail out if Clear All happens mid-decode */
 
   const loadingEl = t.wrapper ? t.wrapper.querySelector('.loading-overlay') : null;
   if (loadingEl) loadingEl.innerHTML = '<div class="spinner"></div>Decoding…';
 
   try {
     const arrBuf = await t.file.arrayBuffer();
-    if (!isTrackAlive(t)) return;  /* track removed during async gap */
+    if (!isTrackAlive(t) || epoch !== clearEpoch) return;  /* removed / cleared during async gap */
 
     const nativeSR = parseNativeSampleRate(arrBuf) || null;
     const decoded = await decodeToAudioBuffer(arrBuf);
-    if (!isTrackAlive(t)) return;  /* track removed during async gap */
+    if (!isTrackAlive(t) || epoch !== clearEpoch) return;  /* removed / cleared during async gap */
 
     t.buffer   = decoded;
     t.loaded   = true;
@@ -1258,6 +1346,31 @@ async function loadTrack(t) {
     t.nyquist  = t.sr / 2;
     t.viewEnd  = decoded.duration;
     t.file     = null;
+
+    /* Multichannel (2–8ch): expand to per-channel lanes. Such files never stay
+       in a diff group — split them out into standalone cards. */
+    const nCh = decoded.numberOfChannels;
+    if (nCh > 1 && !t.isMulti) {
+      if (t.groupId != null) {
+        if (isTrackAlive(t)) splitMultiOutOfGroup(t);
+        if (loadingEl && loadingEl.parentNode) loadingEl.remove();
+        t._loading = false;
+        return;
+      }
+      if (nCh <= 8) {
+        rebuildBodyAsMulti(t);
+        if (t.nyquist > 0) {
+          const bodies = new Set();
+          for (const chv of t.chViews) { const b = chv.canvas && chv.canvas.closest('.track-body'); if (b) bodies.add(b); }
+          for (const b of bodies) b.querySelectorAll('.freq-labels').forEach(fl => { if (!fl.querySelector('.freq-tick')) addFreqLabels(fl, t.nyquist); });
+        }
+        if (t._pendingRender) { t._pendingRender(); t._pendingRender = null; }
+        updateCardInfo(t.el);
+        updateRuler(t);
+        t._loading = false;
+        return;
+      }
+    }
 
     if (t.wrapper && t.canvas) {
       const w = t.wrapper.clientWidth;
@@ -1855,14 +1968,14 @@ async function handleDroppedItems(fileList) {
      — no audio payload is retained. Cards are then materialized on demand:
      the first INITIAL_RENDER cards appear as soon as they are indexed, the
      rest wait for the scroll sentinel, and each card decodes on demand. */
-  const metaMap = new Map();              /* key -> .json text (kept, small) */
+  const archiveMeta = new Map();          /* key -> .json text (kept, small) */
   const notices = [];
   const STREAM_BATCH = 40;
   let queue = [];                         /* lightweight indexed items awaiting flush */
 
   const flushIndex = () => {
     if (!queue.length) return;
-    const grouped = groupByBaseName(queue);
+    const grouped = groupItems(queue);
     queue = [];
     for (const g of grouped) pendingCards.push(g);
     renderWindow(INITIAL_RENDER - renderedCards.length);
@@ -1873,13 +1986,13 @@ async function handleDroppedItems(fileList) {
     let changed = false;
     for (const t of tracks) {
       if (t.meta) continue;
-      const m = metaMap.get(metaKeyOf(t.name, t.filePath || null));
+      const m = archiveMeta.get(metaKeyOf(t.name, t.filePath || null));
       if (m && m !== t.meta) { t.meta = m; changed = true; }
     }
     for (const d of pendingCards) {
       for (const it of d.items) {
         if (it.meta) continue;
-        const m = metaMap.get(metaKeyOf(it.name, it.filePath || null));
+        const m = archiveMeta.get(metaKeyOf(it.name, it.filePath || null));
         if (m) it.meta = m;
       }
     }
@@ -1904,11 +2017,16 @@ async function handleDroppedItems(fileList) {
         const handle = lazyAudioHandle(fetcher, rec.seq, rec.name, readyPromise);
         queue.push({
           name: rec.name, buffer: null, nativeSR: null, file: handle, filePath: rec.path,
-          meta: metaMap.get(metaKeyOf(rec.name, rec.path)) || null
+          meta: archiveMeta.get(metaKeyOf(rec.name, rec.path)) || null
         });
         shown++;
       },
-      onJson: j => { metaMap.set(metaKeyOf(j.name, j.path), j.text); },
+      onJson: j => {
+        const k = metaKeyOf(j.name, j.path);
+        archiveMeta.set(k, j.text);
+        metaMap.set(k, j.text);
+        metaSource.set(k, j.path);
+      },
       captureAudio: seq => seq < ARCH_PREWARM
     });
 
@@ -2013,10 +2131,9 @@ function metaKeyOf(name, path) {
 }
 function metaKeyOfFile(f) { return metaKeyOf(f.name, f._tarPath || null); }
 
-/* Read .json files and return a Map key → text. Oversized files are skipped. */
+/* Read .json files into the global metaMap (key → text). Oversized skipped. */
 async function buildMetaMap(jsonList) {
-  const map = new Map();
-  if (!jsonList || !jsonList.length) return map;
+  if (!jsonList || !jsonList.length) return metaMap;
   const dec = new TextDecoder('utf-8');
   await Promise.all(jsonList.map(async f => {
     let text = null;
@@ -2024,9 +2141,12 @@ async function buildMetaMap(jsonList) {
       if (f.size > (4 << 20)) return;            /* too big to be metadata */
       text = dec.decode(await f.arrayBuffer());
     } catch (e) { console.error('Meta read error:', f.name, e); return; }
-    map.set(metaKeyOfFile(f), text);
+    const k = metaKeyOfFile(f);
+    metaMap.set(k, text);
+    metaSource.set(k, f._tarPath || f.name);
   }));
-  return map;
+  invalidateFieldContent();
+  return metaMap;
 }
 
 async function handleFiles(fileList, metaFiles) {
@@ -2061,13 +2181,18 @@ async function handleFiles(fileList, metaFiles) {
       batch.push(...results);
     }
     if (!batch.length) return;
-    const grouped = groupByBaseName(batch);
-    applyGrouped(grouped);
+    /* Multichannel files are never grouped — render each as a standalone card. */
+    const multiItems = batch.filter(it => it.buffer && it.buffer.numberOfChannels > 1);
+    const rest = batch.filter(it => !(it.buffer && it.buffer.numberOfChannels > 1));
+    for (const it of multiItems) {
+      createStandalone(it.name, it.buffer, it.nativeSR, it.file, it.filePath, it.meta);
+    }
+    if (rest.length) applyGrouped(groupItems(rest));
     refreshUI();
   } else {
     /* ── LAZY PATH: windowed placeholder cards, decode on scroll ── */
     const items = audioFiles.map(f => ({ name: f.name, buffer: null, nativeSR: null, file: f, filePath: f._tarPath || null, meta: attach(f) }));
-    const grouped = groupByBaseName(items);
+    const grouped = groupItems(items);
     for (const g of grouped) pendingCards.push(g);
     renderWindow(INITIAL_RENDER - renderedCards.length);
     updateSentinels();
@@ -2097,6 +2222,7 @@ function applyGrouped(grouped) {
       if (ph) placeCardAtPosition(ph);
     } else {
       const newItem = grp.items[0];
+      if (!autoGroup) { el = createStandalone(newItem.name, newItem.buffer, newItem.nativeSR, newItem.file, newItem.filePath, newItem.meta); els.push(el || null); continue; }
       const { stem, tag } = extractTag(stripExt(newItem.name));
       const existingMatch = findExistingStandaloneByStem(stem);
 
@@ -2129,6 +2255,7 @@ function findExistingStandaloneByStem(stem) {
   const key = stem.toLowerCase();
   for (const t of tracks) {
     if (t.groupId != null) continue;
+    if (t.isMulti) continue;   /* multichannel tracks never join groups */
     const { stem: tStem } = extractTag(stripExt(t.name));
     if (tStem.toLowerCase() === key) return t;
   }
@@ -2350,11 +2477,33 @@ function fftFixed(re, im) {
   }
 }
 
-function computeSpec(track, H) {
+/* Per-buffer STFT cache keyed by channel (chIndex -1 = mono/mixdown). Lets a
+   regroup/split reuse the same AudioBuffer's spectrum without re-running FFT. */
+const specCache = new WeakMap();   /* AudioBuffer -> Map(chIndex -> snapshot) */
+function specCacheGet(buffer, ch) { const m = specCache.get(buffer); return m ? (m.get(ch) || null) : null; }
+function specCacheSet(buffer, ch, snap) { let m = specCache.get(buffer); if (!m) { m = new Map(); specCache.set(buffer, m); } m.set(ch, snap); }
+function restoreSpecCache(track, chIndex) {
+  const lane = chIndex >= 0 ? track.chViews[chIndex] : track;
+  if (!lane || lane.specData) return;
+  const c = specCacheGet(track.buffer, chIndex);
+  if (!c) return;
+  lane.specData = c.specData; lane.specFrames = c.specFrames; lane.specHop = c.specHop;
+  lane.specH = c.specH; lane.specMaxBin = c.specMaxBin; lane.specGlobalPeak = c.specGlobalPeak;
+}
+/* Raw samples for a lane: one channel when chIndex ≥ 0, else mono/mixdown. */
+function rawSamples(track, chIndex) {
+  const buf = track.buffer;
+  if (chIndex >= 0) return buf.getChannelData(chIndex);
+  return buf.numberOfChannels === 1 ? buf.getChannelData(0) : mixDown(buf);
+}
+
+function computeSpec(track, H, chIndex) {
+  if (chIndex === undefined) chIndex = -1;
   if (!track.buffer) return;
+  const lane = chIndex >= 0 ? track.chViews[chIndex] : track;
   const { buffer, nyquist } = track;
   const sr = buffer.sampleRate;
-  const raw = buffer.numberOfChannels === 1 ? buffer.getChannelData(0) : mixDown(buffer);
+  const raw = rawSamples(track, chIndex);
   const nS = raw.length;
   const maxBin = Math.min(FFT_SIZE >> 1, Math.ceil(nyquist / (sr / FFT_SIZE)));
 
@@ -2420,13 +2569,16 @@ function computeSpec(track, H) {
 
   let globalPeak = -Infinity;
   for (let i = 0; i < colDb.length; i++) if (colDb[i] > globalPeak) globalPeak = colDb[i];
-  track.specData = colDb; track.specFrames = nF; track.specHop = hop;
-  track.specH = H; track.specMaxBin = maxBin; track.specGlobalPeak = globalPeak;
+  lane.specData = colDb; lane.specFrames = nF; lane.specHop = hop;
+  lane.specH = H; lane.specMaxBin = maxBin; lane.specGlobalPeak = globalPeak;
+  specCacheSet(buffer, chIndex, { specData: colDb, specFrames: nF, specHop: hop, specH: H, specMaxBin: maxBin, specGlobalPeak: globalPeak });
 }
 
-function drawSpec(track) {
+function drawSpec(track, chIndex) {
+  if (chIndex === undefined) chIndex = -1;
   if (!track.buffer) return;
-  const { canvas, specData, specFrames, specHop, specH } = track;
+  const lane = chIndex >= 0 ? track.chViews[chIndex] : track;
+  const { canvas, specData, specFrames, specHop, specH } = lane;
   if (!canvas || !specData || !specFrames) return;
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
@@ -2439,7 +2591,7 @@ function drawSpec(track) {
   const startFrame = Math.max(0, Math.floor((startSample - FFT_SIZE / 2) / hop));
   const endFrame = Math.min(nF - 1, Math.ceil((endSample - FFT_SIZE / 2) / hop));
   const visibleFrames = Math.max(1, endFrame - startFrame + 1);
-  let peak = track.specGlobalPeak;
+  let peak = lane.specGlobalPeak;
   if (peak < -120) peak = -50;
   /* Absolute-reference top: never normalize a sub-full-scale file up to full
      brightness, so quiet/near-silent files stay dark (no misleading comb). */
@@ -2464,17 +2616,65 @@ function drawSpec(track) {
   ctx.putImageData(img, 0, 0);
 }
 
-async function renderSpec(track) {
+async function renderSpec(track, chIndex) {
   if (!track.buffer) return;
+  if (chIndex === undefined) chIndex = -1;
+  if (chIndex >= 0) {
+    restoreSpecCache(track, chIndex);
+    const lane = track.chViews[chIndex];
+    if (!lane.specData) computeSpec(track, lane.canvas ? lane.canvas.height : CH_SPEC_H, chIndex);
+    if (!isTrackAlive(track)) return;
+    drawSpec(track, chIndex);
+    return;
+  }
   await ensureSpec(track);
   if (!isTrackAlive(track)) return;
   drawSpec(track);
 }
 
 function redrawTrack(track) {
+  if (isMultiTrack(track)) {
+    for (let i = 0; i < track.chViews.length; i++) {
+      const ch = track.chViews[i];
+      if (ch.canvas && ch.specData) drawSpec(track, i);
+      if (waveformVisible && ch.waveformCanvas) drawWaveform(track, i);
+    }
+    return;
+  }
   if (!track.canvas || !track.specData) return;
   drawSpec(track);
   if (waveformVisible && track.waveformCanvas) drawWaveform(track);
+}
+
+function isMultiTrack(track) { return !!track.isMulti && track.chViews.length > 0; }
+function expandChannelCount(track) {
+  if (!track.buffer) return 0;
+  if (track.groupId != null) return 0;   /* diff-group lanes are never expanded */
+  const n = track.buffer.numberOfChannels;
+  if (n < 2 || n > 8) return 0;
+  return n;
+}
+function channelSpecHeight(chCount) {
+  if (chCount <= 2) return SPEC_H;
+  if (chCount <= 4) return CH_SPEC_H;
+  return Math.max(80, Math.round(CH_SPEC_H * 4 / chCount));
+}
+function ensureChannelViews(track, n) {
+  if (!track.isMulti || track.chViews.length) return;
+  track.chViews = [];
+  for (let i = 0; i < n; i++) {
+    track.chViews.push({
+      chIndex: i, canvas: null, wrapper: null, ph: null,
+      waveformCanvas: null, waveformWrapper: null, waveformRow: null, waveformPh: null,
+      specData: null, specFrames: 0, specHop: 0, specH: 0, specMaxBin: 0, specGlobalPeak: -Infinity,
+      labelEl: null,
+    });
+  }
+}
+function channelName(i) {
+  if (i === 0) return 'Left';
+  if (i === 1) return 'Right';
+  return 'Channel ' + (i + 1);
 }
 
 /* ========== ZOOM FUNCTIONS ========== */
@@ -2546,19 +2746,20 @@ function addWaveformLabels(el, h) {
   }
 }
 
-function drawWaveform(track) {
+function drawWaveform(track, chIndex) {
+  if (chIndex === undefined) chIndex = -1;
   if (!track.buffer) return;
-  const canvas = track.waveformCanvas;
+  const lane = chIndex >= 0 ? track.chViews[chIndex] : track;
+  const canvas = lane.waveformCanvas;
   if (!canvas) return;
-  const refW = track.canvas ? track.canvas.width : 0;
+  const refW = lane.canvas ? lane.canvas.width : 0;
   if (refW > 0 && canvas.width !== refW) canvas.width = refW;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const W = canvas.width, H = canvas.height;
   if (W === 0 || H === 0) return;
-  const buf = track.buffer;
-  const raw = buf.numberOfChannels === 1 ? buf.getChannelData(0) : mixDown(buf);
-  const sr = buf.sampleRate, nS = raw.length;
+  const raw = rawSamples(track, chIndex);
+  const sr = track.buffer.sampleRate, nS = raw.length;
   const startSample = Math.max(0, Math.floor(track.viewStart * sr));
   const endSample = Math.min(nS, Math.ceil(track.viewEnd * sr));
   const visibleSamples = endSample - startSample;
@@ -2582,6 +2783,21 @@ function drawWaveform(track) {
 function setWaveformVisible(visible) {
   waveformVisible = visible;
   for (const t of tracks) {
+    if (isMultiTrack(t)) {
+      for (let i = 0; i < t.chViews.length; i++) {
+        const ch = t.chViews[i];
+        if (ch.waveformRow) ch.waveformRow.style.display = visible ? 'flex' : 'none';
+        if (visible && ch.waveformCanvas && ch.wrapper) {
+          const w = ch.wrapper.clientWidth;
+          if (w > 0) {
+            ch.waveformCanvas.width = w;
+            if (ch.waveformCanvas._h) ch.waveformCanvas.height = ch.waveformCanvas._h;
+            drawWaveform(t, i);
+          }
+        }
+      }
+      continue;
+    }
     if (t.waveformRow) t.waveformRow.style.display = visible ? 'flex' : 'none';
     /* only re-rasterize tracks whose canvas backing is currently live;
        offscreen (released) ones are handled when they scroll back near */
@@ -2614,10 +2830,12 @@ function mkTrack(name, buffer, nativeSR, file, filePath, meta) {
     canvas:null, wrapper:null, ph:null, laneLabel:null, analysisStrip:null, analyzeBtn:null, rulerEl:null,
     metaPanel:null,
     playing:false, startTime:0, offset:0, source:null,
-    groupId:null, el:null, analysisResults:null,
+    groupId:null, el:null, analysisResults:null, analysisCollapsed:false,
     viewStart:0, viewEnd:dur,
     specData:null, specFrames:0, specHop:0, specH:0, specMaxBin:0, specGlobalPeak:-Infinity,
-    waveformCanvas:null, waveformWrapper:null, waveformRow:null, waveformPh:null
+    waveformCanvas:null, waveformWrapper:null, waveformRow:null, waveformPh:null,
+    /* Multichannel expansion: one lane per channel (2–8ch, standalone only). */
+    isMulti:false, chViews:[], mutedCh:new Set(), activeCh:null, muteBtn:[]
   };
 }
 
@@ -2628,6 +2846,21 @@ function getParentFolderName(path) {
 }
 
 function buildSpecBody(track, h) {
+  /* Standalone multichannel files expand into one lane per channel. Files that
+     live inside a diff group stay single-view; such members are split out on
+     decode (see loadTrack → splitMultiOutOfGroup). */
+  if (track.groupId == null && track.buffer && track.buffer.numberOfChannels > 1) track.isMulti = true;
+  const chCount = expandChannelCount(track);
+  if (chCount >= 2) {
+    track.chViews = track.chViews.length ? track.chViews : [];
+    ensureChannelViews(track, chCount);
+    return buildMultiChannelBody(track, h);
+  }
+  track.chViews = [];
+  return buildSingleLaneBody(track, h);
+}
+
+function buildSingleLaneBody(track, h) {
   const el = document.createElement('div');
   el.className = 'track-body';
   el.style.flexDirection = 'column';
@@ -2679,72 +2912,7 @@ function buildSpecBody(track, h) {
   addFreqLabels(specRow.querySelector('.freq-labels'), track.nyquist);
   const loading = specRow.querySelector('.loading-overlay');
 
-  /* Click to seek (zoom-aware) — works on both spec and waveform */
-  const seekHandler = e => {
-    if (track.wrapper._wasDrag) { track.wrapper._wasDrag = false; return; }
-    const rect = track.canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const ratio = Math.max(0, Math.min(1, cx / rect.width));
-    const time = track.viewStart + ratio * (track.viewEnd - track.viewStart);
-    selectAndSeek(track, time);
-  };
-  track.wrapper.addEventListener('click', seekHandler);
-  track.waveformWrapper.addEventListener('click', seekHandler);
-
-  /* Ctrl+wheel = zoom, plain wheel = horizontal scroll (when zoomed) */
-  const wheelHandler = e => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const rect = track.canvas.getBoundingClientRect();
-      const mouseX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const factor = e.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
-      applyZoom(track, mouseX, factor);
-    } else {
-      const span = track.viewEnd - track.viewStart;
-      if (span >= track.duration - 0.001) return;
-      e.preventDefault();
-      applyPan(track, (e.deltaY / 500) * span);
-    }
-  };
-  track.wrapper.addEventListener('wheel', wheelHandler, { passive: false });
-  track.waveformWrapper.addEventListener('wheel', wheelHandler, { passive: false });
-
-  /* Shift+drag = selection zoom (listeners registered on mousedown, removed on mouseup) */
-  let dragStartX = null, selBox = null;
-  const onDragMove = e => {
-    if (dragStartX === null || !selBox || !track.canvas) return;
-    const rect = track.canvas.getBoundingClientRect();
-    const left = Math.max(0, Math.min(dragStartX, e.clientX) - rect.left);
-    const right = Math.min(rect.width, Math.max(dragStartX, e.clientX) - rect.left);
-    selBox.style.left = left + 'px'; selBox.style.width = (right - left) + 'px';
-  };
-  const onDragUp = e => {
-    document.removeEventListener('mousemove', onDragMove);
-    document.removeEventListener('mouseup', onDragUp);
-    if (dragStartX === null) return;
-    const rect = track.canvas.getBoundingClientRect();
-    const x1 = Math.max(0, (Math.min(dragStartX, e.clientX) - rect.left) / rect.width);
-    const x2 = Math.min(1, (Math.max(dragStartX, e.clientX) - rect.left) / rect.width);
-    if (selBox) selBox.remove(); selBox = null; dragStartX = null;
-    if (x2 - x1 < 0.01) return;
-    track.wrapper._wasDrag = true;
-    const span = track.viewEnd - track.viewStart;
-    const ns = track.viewStart + x1 * span, ne = track.viewStart + x2 * span;
-    setTrackView(track, ns, ne); syncGroupZoom(track); redrawTrack(track); updateRuler(track);
-    if (track.groupId != null) { const sibs = getSiblings(track); for (const s of sibs) { if (s.id !== track.id) { redrawTrack(s); updateRuler(s); } } }
-    updatePlayheads();
-  };
-  track.wrapper.addEventListener('mousedown', e => {
-    if (e.shiftKey) {
-      e.preventDefault(); e.stopPropagation();
-      dragStartX = e.clientX;
-      selBox = document.createElement('div');
-      selBox.className = 'zoom-selection'; selBox.style.height = '100%';
-      track.wrapper.appendChild(selBox);
-      document.addEventListener('mousemove', onDragMove);
-      document.addEventListener('mouseup', onDragUp);
-    }
-  });
+  attachLaneInteractions(track, track.canvas, track.wrapper, track.waveformWrapper);
 
   if (track.loaded) {
     /* Loaded track: schedule spectrogram render after DOM insertion */
@@ -2772,6 +2940,264 @@ function buildSpecBody(track, h) {
     track._pendingRender = null;
   }
   return el;
+}
+
+/* Bind seek / zoom / selection-drag to one lane's canvas. All lanes share the
+   track's time axis (viewStart/viewEnd); only the geometry differs per lane. */
+function attachLaneInteractions(track, canvas, wrapper, waveWrapper) {
+  if (!canvas) return;
+  const seekHandler = e => {
+    if (wrapper._wasDrag) { wrapper._wasDrag = false; return; }
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, cx / rect.width));
+    const time = track.viewStart + ratio * (track.viewEnd - track.viewStart);
+    selectAndSeek(track, time);
+  };
+  wrapper.addEventListener('click', seekHandler);
+  waveWrapper.addEventListener('click', seekHandler);
+
+  const wheelHandler = e => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const factor = e.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR;
+      applyZoom(track, mouseX, factor);
+    } else {
+      const span = track.viewEnd - track.viewStart;
+      if (span >= track.duration - 0.001) return;
+      e.preventDefault();
+      applyPan(track, (e.deltaY / 500) * span);
+    }
+  };
+  wrapper.addEventListener('wheel', wheelHandler, { passive: false });
+  waveWrapper.addEventListener('wheel', wheelHandler, { passive: false });
+
+  let dragStartX = null, selBox = null;
+  const onDragMove = e => {
+    if (dragStartX === null || !selBox) return;
+    const rect = canvas.getBoundingClientRect();
+    const left = Math.max(0, Math.min(dragStartX, e.clientX) - rect.left);
+    const right = Math.min(rect.width, Math.max(dragStartX, e.clientX) - rect.left);
+    selBox.style.left = left + 'px'; selBox.style.width = (right - left) + 'px';
+  };
+  const onDragUp = e => {
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('mouseup', onDragUp);
+    if (dragStartX === null) return;
+    const rect = canvas.getBoundingClientRect();
+    const x1 = Math.max(0, (Math.min(dragStartX, e.clientX) - rect.left) / rect.width);
+    const x2 = Math.min(1, (Math.max(dragStartX, e.clientX) - rect.left) / rect.width);
+    if (selBox) selBox.remove(); selBox = null; dragStartX = null;
+    if (x2 - x1 < 0.01) return;
+    wrapper._wasDrag = true;
+    const span = track.viewEnd - track.viewStart;
+    const ns = track.viewStart + x1 * span, ne = track.viewStart + x2 * span;
+    setTrackView(track, ns, ne); syncGroupZoom(track); redrawTrack(track); updateRuler(track);
+    if (track.groupId != null) { const sibs = getSiblings(track); for (const s of sibs) { if (s.id !== track.id) { redrawTrack(s); updateRuler(s); } } }
+    updatePlayheads();
+  };
+  wrapper.addEventListener('mousedown', e => {
+    if (e.shiftKey) {
+      e.preventDefault(); e.stopPropagation();
+      dragStartX = e.clientX;
+      selBox = document.createElement('div');
+      selBox.className = 'zoom-selection'; selBox.style.height = '100%';
+      wrapper.appendChild(selBox);
+      document.addEventListener('mousemove', onDragMove);
+      document.addEventListener('mouseup', onDragUp);
+    }
+  });
+}
+
+/* Multichannel body — one channel lane (label + waveform + spectrogram) per
+   channel, sharing the track's time axis/ruler. One analysis strip at the end. */
+function buildMultiChannelBody(track, h) {
+  const el = document.createElement('div');
+  el.className = 'track-body';
+  el.style.flexDirection = 'column';
+
+  const loadings = [];
+  const chH = channelSpecHeight(track.chViews.length);
+
+  for (let i = 0; i < track.chViews.length; i++) {
+    const ch = track.chViews[i];
+    const laneEl = document.createElement('div');
+    laneEl.className = 'ch-lane';
+
+    /* Channel label row */
+    const lblRow = document.createElement('div');
+    lblRow.className = 'ch-label';
+    lblRow.innerHTML =
+      '<span class="ch-tag">Ch' + (i + 1) + '</span>' +
+      '<span class="ch-name">' + esc(channelName(i)) + '</span>' +
+      '<button class="ch-mute" title="Mute this channel">Mute</button>' +
+      '<span class="ch-spacer"></span>';
+    const muteBtn = lblRow.querySelector('.ch-mute');
+    track.muteBtn[i] = muteBtn;
+    lblRow.querySelector('.ch-name').addEventListener('click', e => { e.stopPropagation(); selectChannel(track, i); });
+    muteBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      selectChannel(track, i);
+      if (track.mutedCh.has(i)) track.mutedCh.delete(i); else track.mutedCh.add(i);
+      updateChannelListenUI(track);
+      applyChannelListen(track);
+    });
+    laneEl.appendChild(lblRow);
+    ch.labelEl = lblRow;
+
+    /* Waveform row */
+    const wfH = getWaveformHeight(chH);
+    const waveRow = document.createElement('div');
+    waveRow.className = 'waveform-row';
+    waveRow.style.height = wfH + 'px';
+    waveRow.style.display = waveformVisible ? 'flex' : 'none';
+    waveRow.innerHTML =
+      '<div class="waveform-labels" style="height:' + wfH + 'px"></div>' +
+      '<div class="waveform-wrapper" style="flex:1;position:relative;overflow:hidden;cursor:crosshair">' +
+      '<canvas height="' + wfH + '"></canvas>' +
+      '<div style="position:absolute;top:0;left:0;width:2px;height:100%;background:#ff3333;pointer-events:none;z-index:10" class="wf-playhead"></div>' +
+      '</div>';
+    laneEl.appendChild(waveRow);
+    ch.waveformRow = waveRow;
+    ch.waveformWrapper = waveRow.querySelector('.waveform-wrapper');
+    ch.waveformCanvas = waveRow.querySelector('canvas');
+    ch.waveformPh = waveRow.querySelector('.wf-playhead');
+    ch.waveformCanvas._h = wfH;
+    addWaveformLabels(waveRow.querySelector('.waveform-labels'), wfH);
+
+    /* Spectrogram row */
+    const specRow = document.createElement('div');
+    specRow.style.cssText = 'display:flex;flex:1;min-height:0';
+    specRow.innerHTML =
+      '<div class="freq-labels" style="height:' + chH + 'px"></div>' +
+      '<div class="spec-wrapper" style="height:' + chH + 'px">' +
+      '<canvas height="' + chH + '"></canvas>' +
+      '<div class="playhead" style="left:0"></div>' +
+      '<div class="loading-overlay"><div class="spinner"></div>Rendering...</div>' +
+      '</div>';
+    laneEl.appendChild(specRow);
+
+    el.appendChild(laneEl);
+
+    ch.canvas = specRow.querySelector('canvas');
+    ch.wrapper = specRow.querySelector('.spec-wrapper');
+    ch.ph = specRow.querySelector('.playhead');
+    ch.canvas._h = chH;
+    addFreqLabels(specRow.querySelector('.freq-labels'), track.nyquist);
+    const loading = specRow.querySelector('.loading-overlay');
+
+    attachLaneInteractions(track, ch.canvas, ch.wrapper, ch.waveformWrapper);
+    loadings.push(loading);
+  }
+
+  const strip = document.createElement('div');
+  strip.className = 'analysis-strip empty';
+  strip.style.paddingLeft = '44px';
+  el.appendChild(strip);
+  track.analysisStrip = strip;
+
+  /* Aggregate pending render over all channel lanes. */
+  if (track.loaded) {
+    track._pendingRender = () => {
+      const first = track.chViews[0];
+      const w = first && first.wrapper ? first.wrapper.clientWidth : 0;
+      if (w > 0) {
+        for (const ch of track.chViews) {
+          if (ch.canvas) ch.canvas.width = w;
+          if (ch.waveformCanvas) ch.waveformCanvas.width = w;
+        }
+        setTimeout(() => {
+          if (!isTrackAlive(track)) { for (const ld of loadings) if (ld.parentNode) ld.remove(); return; }
+          for (let i = 0; i < track.chViews.length; i++) renderSpec(track, i);
+          if (waveformVisible) for (let i = 0; i < track.chViews.length; i++) drawWaveform(track, i);
+          for (const ld of loadings) if (ld.parentNode) ld.remove();
+        }, 0);
+      } else {
+        for (const ld of loadings) if (ld.parentNode) ld.remove();
+      }
+    };
+  } else {
+    for (const ld of loadings) ld.innerHTML = '<span style="color:#666;font-size:11px">Waiting to load…</span>';
+    track._pendingRender = null;
+  }
+
+  updateChannelListenUI(track);
+  return el;
+}
+
+function updateChannelListenUI(t) {
+  const n = t.buffer ? t.buffer.numberOfChannels : 0;
+  for (let c = 0; c < n; c++) {
+    const mute = t.muteBtn[c];
+    if (mute) mute.classList.toggle('on', t.mutedCh.has(c));
+  }
+}
+function updateChannelActiveUI(t) {
+  for (let c = 0; c < t.chViews.length; c++) {
+    const el = t.chViews[c].labelEl;
+    if (el) el.classList.toggle('selected', t.activeCh === c);
+  }
+}
+function selectChannel(t, c) { t.activeCh = c; updateChannelActiveUI(t); }
+
+/* Rebuild a decoded lazy card's body into per-channel lanes in place (header /
+   ruler preserved). */
+function rebuildBodyAsMulti(track) {
+  const card = track.el;
+  if (!card) return;
+  const old = card.querySelector('.card-left .track-body') || card.querySelector('.track-body');
+  const ruler = card.querySelector('.card-left .time-ruler') || card.querySelector('.time-ruler');
+  track.isMulti = true;
+  ensureChannelViews(track, expandChannelCount(track));
+  const body = buildMultiChannelBody(track, SPEC_H);
+  if (old && old.parentNode) {
+    const parent = old.parentNode;
+    if (ruler && ruler.parentNode === parent) parent.insertBefore(body, ruler);
+    else if (old.nextSibling) parent.insertBefore(body, old.nextSibling);
+    else parent.appendChild(body);
+    old.remove();
+  } else if (ruler && ruler.parentNode) {
+    ruler.parentNode.insertBefore(body, ruler);
+  } else {
+    card.appendChild(body);
+  }
+  scheduleGeometry();
+}
+
+/* A now-multichannel member is never allowed to stay in a diff group: split the
+   group into standalone cards in place and return true. */
+function splitMultiOutOfGroup(track) {
+  const g = groups.find(gr => gr.id === track.groupId);
+  if (!g) return false;
+  const rec = renderedCards.find(d => d._el === g.el);
+  const placeholder = document.createElement('div');
+  if (g.el && g.el.parentNode === tracksBox) tracksBox.insertBefore(placeholder, g.el);
+  const gid = g.id;
+  const members = g.trackIds.map(id => tracks.find(x => x.id === id)).filter(x => x && x.id !== track.id);
+  removeDiffGroupQuietly(gid);
+  const newEls = [];
+  const newDescs = [];
+  for (const m of members) {
+    const el = createStandalone(m.name, m.buffer || null, m.nativeSR, m.file, m.filePath, m.meta || null);
+    newEls.push(el);
+    newDescs.push({ baseName: m.name, items: [{ name: m.name, buffer: m.buffer || null, nativeSR: m.nativeSR, file: m.file, filePath: m.filePath, meta: m.meta || null }], _el: el });
+  }
+  const selfEl = createStandalone(track.name, track.buffer || null, track.nativeSR, track.file, track.filePath, track.meta || null);
+  newEls.push(selfEl);
+  newDescs.push({ baseName: track.name, items: [{ name: track.name, buffer: track.buffer || null, nativeSR: track.nativeSR, file: track.file, filePath: track.filePath, meta: track.meta || null }], _el: selfEl });
+  for (const el of newEls) if (el && placeholder.parentNode) tracksBox.insertBefore(el, placeholder);
+  placeholder.remove();
+  if (rec) {
+    const i = renderedCards.indexOf(rec);
+    if (i >= 0) renderedCards.splice(i, 1, ...newDescs);
+  }
+  fixActiveTrack();
+  refreshUI();
+  const self = tracks.find(x => x.el === selfEl);
+  if (self && self.isMulti && self.loaded && self._pendingRender) { self._pendingRender(); self._pendingRender = null; }
+  return true;
 }
 
 function niceStep(rawStep) {
@@ -2962,222 +3388,135 @@ function makeMetaResizer() {
 
 /* ========================================================================
  *  JSON METADATA INTERACTION — click JSON keys to multi-select fields.
- *  While fields are selected every row shows those fields (highlighted);
- *  click a selected key again (or × / uncheck) to go back to the tree.
+ *  Field paths are JSON Pointers (RFC 6901) so keys containing '.' or markup
+ *  characters work. While fields are selected every row shows those fields
+ *  (highlighted); click a selected key again (or x / uncheck) to go back.
  * ======================================================================== */
-let metaSelPaths = new Set();   /* dotted paths currently selected */
-const META_INLINE_CAP = 220;   /* max chars of an inline value preview */
+let metaSelPaths = new Set();   /* JSON Pointer paths currently selected */
+const META_INLINE_CAP = 220;    /* max chars of an inline value preview */
 
-function safeJsonParse(raw) {
-  try { return JSON.parse(raw); } catch (e) { return null; }
-}
-function metaLooksJson(s) {
-  const t = String(s).trim();
-  return (t[0] === '{' || t[0] === '[') && t.length < 200000;
-}
+/* Global map of every loaded .json: key -> raw text (+ source path). Filled by
+   buildMetaMap()/the archive reader; read by the fields browser and to render
+   standalone (unpaired) JSON cards. */
+const metaMap = new Map();
+const metaSource = new Map();
 
-/* Flatten a parsed JSON value into dotted paths → leaf values. A single-key
-   root wrapper object (webdataset style {"<id>": …}) is unwrapped, and
-   embedded JSON strings are expanded so nested paths resolve everywhere. */
-function flattenMeta(value, prefix, out, isRoot) {
-  if (value === null || typeof value !== 'object') {
-    if (prefix) out.set(prefix, value);
-    return;
-  }
-  if (isRoot && !Array.isArray(value)) {
-    const keys = Object.keys(value);
-    if (keys.length === 1 && value[keys[0]] !== null && typeof value[keys[0]] === 'object' && !Array.isArray(value[keys[0]])) {
-      flattenMeta(value[keys[0]], '', out, false);
-      return;
-    }
-  }
-  for (const k of Object.keys(value)) {
-    const child = value[k];
-    const p = prefix ? prefix + '.' + k : k;
-    if (child !== null && typeof child === 'object' && !Array.isArray(child)) {
-      flattenMeta(child, p, out, false);
-    } else {
-      out.set(p, child);
-      if (child !== null && typeof child === 'string' && metaLooksJson(child)) {
-        const inner = safeJsonParse(child);
-        if (inner) flattenMeta(inner, p, out, false);
-      }
-    }
-  }
-}
-function metaLeafMap(raw) {
-  const v = safeJsonParse(raw);
-  if (!v) return null;
-  const m = new Map();
-  flattenMeta(v, '', m, true);
-  return m;
-}
-const metaLeafCache = new Map();
-function cachedLeafMap(raw) {
-  if (metaLeafCache.has(raw)) return metaLeafCache.get(raw);
-  const m = metaLeafMap(raw);
-  if (metaLeafCache.size > 6000) metaLeafCache.clear();
-  metaLeafCache.set(raw, m);
-  return m;
+/* ---- JSON Pointer (RFC 6901) path helpers ---- */
+function encMetaSeg(seg) { return String(seg).replace(/~/g, '~0').replace(/\//g, '~1'); }
+function decMetaSeg(seg) { return String(seg).replace(/~1/g, '/').replace(/~0/g, '~'); }
+function joinMetaPath(prefix, seg) { return prefix + '/' + encMetaSeg(seg); }
+function metaPathSegments(path) { return path ? path.split('/').slice(1).map(decMetaSeg) : []; }
+function displayMetaPath(path) {
+  return metaPathSegments(path).map((seg, idx) => {
+    if (/^\d+$/.test(seg)) return '[' + seg + ']';
+    if (/^[A-Za-z_$][\w$]*$/.test(seg)) return idx === 0 ? seg : '.' + seg;
+    return '[' + JSON.stringify(seg) + ']';
+  }).join('');
 }
 
+function safeJsonParse(raw) { try { return JSON.parse(raw); } catch (e) { return null; } }
+function metaLooksJson(s) { const t = String(s).trim(); return (t[0] === '{' || t[0] === '[') && t.length < 200000; }
+/* Unwrap a single-key root wrapper object (webdataset style {"<id>": …}) so the
+   inner fields appear at the root. */
 function unwrapRoot(v) {
   if (v && typeof v === 'object' && !Array.isArray(v)) {
     const ks = Object.keys(v);
-    if (ks.length === 1 && v[ks[0]] !== null && typeof v[ks[0]] === 'object' && !Array.isArray(v[ks[0]])) {
-      return v[ks[0]];
-    }
+    if (ks.length === 1 && v[ks[0]] !== null && typeof v[ks[0]] === 'object' && !Array.isArray(v[ks[0]])) return v[ks[0]];
   }
   return v;
 }
 
-function invalidMetaHtml(raw) {
-  return '<div class="meta-err">' + escMetaText('Invalid JSON') + '</div>' +
-         '<pre class="meta-raw">' + escMetaText(String(raw).slice(0, META_SHOW_MAX)) + '</pre>';
+function jsonScalarCls(v) {
+  if (typeof v === 'number') return 'num';
+  if (typeof v === 'boolean') return 'bool';
+  if (v === null) return 'null';
+  return 'str';
 }
-function clipText(s, cap) { return s.length > cap ? s.slice(0, cap) + ' …' : s; }
-
-/* Inline scalar / array value, syntax coloured & HTML-escaped.
-   String values are shown without surrounding quotes (colour separates
-   them from keys). */
-function scalarHtml(v) {
+function jsonScalarHtml(v) {
   if (v === null) return '<span class="jv-null">null</span>';
-  if (typeof v === 'string') {
-    return '<span class="jv-str" title="' + escAttr(clipText(v, META_SHOW_MAX)) + '">' + escMetaText(clipText(v, META_INLINE_CAP)) + '</span>';
+  if (Array.isArray(v)) return '<span class="jv-punc">' + escMetaText(JSON.stringify(v)) + '</span>';
+  if (typeof v === 'object') return '<span class="jv-punc">{…}</span>';
+  if (typeof v === 'string') return '<span class="jv-str">' + escMetaText(v.length > META_INLINE_CAP ? v.slice(0, META_INLINE_CAP) + '…' : v) + '</span>';
+  return '<span class="jv-' + jsonScalarCls(v) + '">' + escMetaText(String(v)) + '</span>';
+}
+function metaLineHtml(depth, content) {
+  return '<div class="json-line" style="padding-left:' + (depth * 14) + 'px">' + content + '</div>';
+}
+
+/* Render a JSON value as a clickable tree using JSON-Pointer paths. Nested
+   objects recurse; JSON encoded in strings (e.g. ACAV "caption") is expanded. */
+function renderTreeInto(v, depth, out, prefix) {
+  if (v === null || typeof v !== 'object') {
+    out.push(metaLineHtml(depth, '<span class="jv-' + jsonScalarCls(v) + '">' + escMetaText(String(v)) + '</span>'));
+    return;
   }
-  if (typeof v === 'number') return '<span class="jv-num">' + escMetaText(String(v)) + '</span>';
-  if (typeof v === 'boolean') return '<span class="jv-bool">' + v + '</span>';
   if (Array.isArray(v)) {
-    if (!v.length) return '<span class="jv-num">[ ]</span>';
-    let inner;
-    try {
-      inner = v.map(el =>
-        (el !== null && typeof el === 'object' && !Array.isArray(el))
-          ? escMetaText(JSON.stringify(el))
-          : scalarHtml(el)
-      ).join(', ');
-    } catch (e) { inner = '…'; }
-    return '<span class="jv-num">[ ' + clipText(inner, META_INLINE_CAP) + ' ]</span>';
+    if (v.length === 0) { out.push(metaLineHtml(depth, '<span class="jv-punc">[]</span>')); return; }
+    for (let i = 0; i < v.length; i++) {
+      const p = joinMetaPath(prefix, String(i));
+      out.push(metaLineHtml(depth, '<span class="jv-punc">' + i + ':</span>'));
+      renderTreeInto(v[i], depth + 1, out, p);
+    }
+    return;
   }
-  return escMetaText(String(v));
-}
-
-const META_INDENT = 14;   /* px indentation per nesting level */
-
-function lineHtml(depth, html) {
-  return '<div class="json-line" style="padding-left:' + (depth * META_INDENT) + 'px">' + html + '</div>';
-}
-
-/* Render a JSON value as a clickable tree. Keys are clickable when they
-   hold a selectable value: scalars, arrays, and JSON strings (like ACAV's
-   "caption") — the latter are shown expanded so subfields are clickable
-   too, while the parent key itself still selects the whole value. */
-function treePush(value, prefix, depth, out) {
-  if (value === null || typeof value !== 'object') { out.push(lineHtml(depth, scalarHtml(value))); return; }
-  if (Array.isArray(value)) { out.push(lineHtml(depth, scalarHtml(value))); return; }
-  const keys = Object.keys(value);
-  if (!keys.length) { if (depth > 0) out.push(lineHtml(depth, '<span class="jv-punc">{ }</span>')); return; }
-  if (depth > 0) out.push(lineHtml(depth, '<span class="jv-punc">{</span>'));
+  const keys = Object.keys(v);
+  if (keys.length === 0) { out.push(metaLineHtml(depth, '<span class="jv-punc">{}</span>')); return; }
   for (const k of keys) {
-    const child = value[k];
-    const expanded = (typeof child === 'string' && metaLooksJson(child)) ? safeJsonParse(child) : null;
-    const shown = expanded || child;
-    const p = prefix ? prefix + '.' + k : k;
-    const isObjectChild = shown !== null && typeof shown === 'object' && !Array.isArray(shown);
-    /* selectable: scalars/arrays always; JSON-string parents also carry a
-       whole-value entry in the flattened map; pure nested objects only via
-       their children */
-    const selectable = !!expanded || !isObjectChild;
-    const sel = metaSelPaths.has(p);
-    const label = escMetaText(k);
-    let keyTok;
-    if (selectable) {
-      const cls = 'jv-key js-meta-key' + (sel ? ' meta-key-on' : '');
-      const tip = sel ? 'Remove “' + p + '”' : 'Show field “' + p + '” on every row';
-      keyTok = '<span class="' + cls + '" data-path="' + escAttr(p) + '" title="' + escAttr(tip) + '">' + label + '</span>';
-    } else {
-      keyTok = '<span class="jv-key">' + label + '</span>';
+    const p = joinMetaPath(prefix, k);
+    const val = v[k];
+    if (typeof val === 'string' && ((val.trim()[0] === '{' || val.trim()[0] === '[')) && val.length < 200000) {
+      try { renderTreeInto(JSON.parse(val), depth, out, p); continue; } catch (e) { /* literal */ }
     }
-    const head = keyTok + '<span class="jv-punc">:</span>';
-    if (isObjectChild) {
-      out.push(lineHtml(depth, head));
-      treePush(shown, p, depth + 1, out);
-    } else {
-      out.push(lineHtml(depth, head + ' ' + scalarHtml(shown)));
+    if (val !== null && typeof val === 'object') {
+      out.push(metaLineHtml(depth, '<span class="js-meta-key' + metaKeyStateCls(p) + '" data-path="' + escAttr(p) + '" title="Select field ' + escAttr(displayMetaPath(p)) + '">' + escMetaText(k) + '</span> <span class="jv-punc">{…}</span>'));
+      renderTreeInto(val, depth + 1, out, p);
+      continue;
     }
+    out.push(metaLineHtml(depth, '<span class="jv-key js-meta-key' + metaKeyStateCls(p) + '" data-path="' + escAttr(p) + '" title="Select field ' + escAttr(displayMetaPath(p)) + '">' + escMetaText(k) + '</span><span class="jv-punc">:</span> <span class="jv-str-ish">' + jsonScalarHtml(val) + '</span>'));
   }
-  if (depth > 0) out.push(lineHtml(depth, '<span class="jv-punc">}</span>'));
 }
 
-function renderJsonTree(raw) {
-  const v = safeJsonParse(raw);
-  if (v === null || v === undefined) return invalidMetaHtml(raw);
-  const out = [];
-  treePush(unwrapRoot(v), '', 0, out);
-  return out.join('');
-}
-/* Cache rendered tree HTML per raw string — with hundreds of cards, a field
-   toggle must never rebuild every panel's full tree. */
-const metaTreeCache = new Map();
-function cachedTreeHtml(raw) {
-  let h = metaTreeCache.get(raw);
-  if (h === undefined) {
-    h = renderJsonTree(raw);
-    if (metaTreeCache.size > 8000) metaTreeCache.clear();
-    metaTreeCache.set(raw, h);
+function selectedValue(parsed, path) {
+  let cur = unwrapRoot(parsed);
+  for (const part of metaPathSegments(path)) {
+    if (cur == null) return undefined;
+    if (Array.isArray(cur)) { const i = Number(part); if (!Number.isNaN(i)) cur = cur[i]; else return undefined; }
+    else if (typeof cur === 'object') cur = cur[part];
+    else return undefined;
   }
-  return h;
+  return cur;
 }
-
-function prettyJsonText(v) {
-  try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
-}
-function jsonHighlightText(t) {
-  const truncated = t.length > META_SHOW_MAX;
-  let html = highlightJson(truncated ? t.slice(0, META_SHOW_MAX) : t);
-  if (truncated) html += '<div class="meta-trunc">… truncated (' + t.length.toLocaleString() + ' chars)</div>';
-  return html;
-}
-
-/* One selected field's value — JSON-looking values are pretty + highlighted;
-   plain strings are shown without surrounding quotes. */
-function metaValueHtml(v) {
+function metaValueHtml(parsed, path) {
+  const v = selectedValue(parsed, path);
+  if (v === undefined) return '<span class="meta-sel-missing">not present in this file</span>';
+  if (v !== null && typeof v === 'object') { try { return highlightJson(JSON.stringify(v, null, 2).slice(0, META_SHOW_MAX)); } catch (e) { return escMetaText(String(v)); } }
   if (typeof v === 'string') {
-    if (metaLooksJson(v)) {
-      const pv = safeJsonParse(v);
-      if (pv !== null && pv !== undefined) return jsonHighlightText(prettyJsonText(pv));
-    }
-    return '<span class="jv-str">' + escMetaText(v) + '</span>';
+    const t = v.trim();
+    if ((t[0] === '{' || t[0] === '[') && t.length < 200000) { try { return highlightJson(JSON.stringify(JSON.parse(t), null, 2).slice(0, META_SHOW_MAX)); } catch (e) { /* literal */ } }
+    return escMetaText(v.slice(0, META_INLINE_CAP));
   }
-  if (v === null) return '<span class="jv-null">null</span>';
-  if (typeof v === 'number') return '<span class="jv-num">' + escMetaText(String(v)) + '</span>';
-  if (typeof v === 'boolean') return '<span class="jv-bool">' + v + '</span>';
-  if (typeof v === 'object') return jsonHighlightText(prettyJsonText(v));
   return escMetaText(String(v));
 }
 
-/* Panel content. While fields are selected we render ONLY the compact
-   field blocks (fast) — no full tree — so clicks stay instant even with
-   hundreds of cards on screen. */
-function metaBodyHtml(raw) {
-  if (!raw) return '<span class="meta-empty">No paired .json file</span>';
-  if (!metaSelPaths.size) return cachedTreeHtml(raw);
-  const m = cachedLeafMap(raw);
-  if (!m) return cachedTreeHtml(raw);
+function metaBodyHtml(meta) {
+  if (!meta) return '<span class="meta-empty">No paired .json file</span>';
+  let parsed;
+  try { parsed = JSON.parse(meta); } catch (e) { return renderJsonMeta(meta); }
+  if (metaSelPaths.size === 0) {
+    const out = [];
+    renderTreeInto(unwrapRoot(parsed), 0, out, '');
+    return out.join('');
+  }
   const parts = [];
-  for (const p of metaSelPaths) {
-    const label = '<button class="meta-sel-lbl" data-path="' + escAttr(p) + '" title="Click to remove ' + escAttr(p) + '">' + escMetaText(p) + '</button>';
-    if (!m.has(p)) {
-      parts.push('<div class="meta-sel"><div class="meta-sel-head">' + label + '</div><div class="meta-sel-missing">not present in this file</div></div>');
-    } else {
-      parts.push('<div class="meta-sel"><div class="meta-sel-head">' + label + '</div><div class="meta-sel-val">' + metaValueHtml(m.get(p)) + '</div></div>');
-    }
+  const paths = Array.from(metaSelPaths).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  for (const p of paths) {
+    parts.push('<div class="meta-sel"><span class="meta-sel-lbl js-meta-key" data-path="' + escAttr(p) + '">' + escMetaText(displayMetaPath(p)) + '</span><div class="meta-sel-val">' + metaValueHtml(parsed, p) + '</div></div>');
   }
   return parts.join('');
 }
 
-/* Fill a panel with a track's JSON (respects the current selection).
-   Skips the DOM write when nothing actually changed. */
+/* Fill a panel with a track's JSON (respects the current selection). Skips the
+   DOM write when nothing actually changed. */
 function setMetaBody(bodyEl, meta) {
   if (!bodyEl) return;
   const html = metaBodyHtml(meta);
@@ -3187,162 +3526,284 @@ function setMetaBody(bodyEl, meta) {
   bodyEl.scrollTop = 0;
 }
 
-function toggleMetaKey(p) {
-  if (metaSelPaths.has(p)) metaSelPaths.delete(p);
-  else metaSelPaths.add(p);
-  refreshAllMetaBodies();
-}
-function removeMetaKey(p) {
-  metaSelPaths.delete(p);
-  refreshAllMetaBodies();
-}
-function clearMetaSel() {
-  metaSelPaths = new Set();
-  refreshAllMetaBodies();
-}
+function toggleMetaKey(path) { toggleMetaField(path); }
+function removeMetaKey(path) { metaSelPaths.delete(path); commitMetaSel(); }
+function clearMetaSel() { metaSelPaths.clear(); commitMetaSel(); }
 
+/** Apply a field-selection change across every panel and refresh the popup. */
+function commitMetaSel() {
+  invalidateFieldState();
+  refreshMetaBodies();
+  if (metaPopEl && metaPopEl.classList.contains('open')) buildMetaPopList(metaPopEl, metaPopFilter);
+}
 
 function updateMetaHeads() {
   const n = metaSelPaths.size;
-  const txt = n ? (n + ' field' + (n === 1 ? '' : 's')) : 'JSON metadata';
-  const on = n > 0 && metaVisible;
-  document.body.classList.toggle('meta-sel', on);
-  for (const t of tracks) {
-    if (!t.metaPanel) continue;
-    const lbl = t.metaPanel.head && t.metaPanel.head.querySelector('.meta-head-lbl');
-    if (lbl) lbl.textContent = txt;
-  }
-  for (const g of groups) {
-    if (!g.metaPanel) continue;
-    const lbl = g.metaPanel.head && g.metaPanel.head.querySelector('.meta-head-lbl');
-    if (lbl) lbl.textContent = txt;
-  }
+  for (const t of tracks) { if (t.metaPanel && t.metaPanel.head) updateHead(t.metaPanel.head, n); }
+  for (const g of groups) { if (g.metaPanel && g.metaPanel.head) updateHead(g.metaPanel.head, n); }
+  for (const jc of jsonCards) updateHead(jc.panel.head, n);
+}
+function updateHead(head, n) {
+  const lbl = head.querySelector('.meta-head-lbl');
+  if (lbl) lbl.textContent = n ? (n + ' field' + (n === 1 ? '' : 's')) : 'JSON metadata';
+  document.body.classList.toggle('meta-sel', n > 0);
 }
 
-/* ---- field discovery + the in-panel "fields" list overlay ---- */
+function getActiveLaneOfGroup(g) {
+  if (activeTrackId != null) {
+    const t = tracks.find(x => x.id === activeTrackId && x.groupId === g.id);
+    if (t) return t;
+  }
+  for (const id of g.trackIds) { const t = tracks.find(x => x.id === id); if (t) return t; }
+  return undefined;
+}
+
+function refreshMetaBodies() {
+  for (const t of tracks) { if (t.metaPanel && t.metaPanel.body) setMetaBody(t.metaPanel.body, t.meta); }
+  for (const g of groups) { const active = getActiveLaneOfGroup(g); if (g.metaPanel && g.metaPanel.body) setMetaBody(g.metaPanel.body, active ? active.meta : null); }
+  for (const jc of jsonCards) setMetaBody(jc.panel.body, metaMap.get(jc.key) ?? null);
+  updateMetaHeads();
+}
+/* Back-compat alias used by the archive attach pass + JSON toggle. */
+function refreshAllMetaBodies() { refreshMetaBodies(); }
+
+/* ---- field discovery + hierarchical fields browser ---- */
 function discoverMetaFields() {
-  const counts = new Map();
-  const addMeta = meta => {
-    if (!meta) return;
-    const m = cachedLeafMap(meta);
-    if (!m) return;
-    for (const p of m.keys()) counts.set(p, (counts.get(p) || 0) + 1);
+  const m = new Map();
+  const walk = (v, prefix) => {
+    if (!v || typeof v !== 'object') return;
+    if (Array.isArray(v)) { v.forEach((x, i) => walk(x, joinMetaPath(prefix, String(i)))); return; }
+    for (const k of Object.keys(v)) { const p = joinMetaPath(prefix, k); m.set(p, (m.get(p) || 0) + 1); walk(v[k], p); }
   };
-  for (const t of tracks) addMeta(t.meta);
-  for (const grp of pendingCards) for (const it of (grp.items || [])) addMeta(it.meta);
-  return Array.from(counts.entries())
-    .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
+  for (const raw of metaMap.values()) {
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { continue; }
+    walk(unwrapRoot(parsed), '');
+  }
+  return m;
+}
+
+let fieldTreeCache = null;
+let fieldStateCache = null;
+let metaPopFilter = '';
+const metaCollapsed = new Set();   /* collapsed node paths in the popup */
+
+function invalidateFieldContent() { fieldTreeCache = null; fieldStateCache = null; }
+function invalidateFieldState() { fieldStateCache = null; }
+
+function buildFieldTree() {
+  const fields = discoverMetaFields();
+  const root = { name: '', path: '', count: 0, children: [], leaves: [] };
+  const byPath = new Map([['', root]]);
+  const ensure = path => {
+    const hit = byPath.get(path);
+    if (hit) return hit;
+    const slash = path.lastIndexOf('/');
+    const last = decMetaSeg(path.slice(slash + 1));
+    const parent = ensure(slash > 0 ? path.slice(0, slash) : '');
+    const node = { name: /^\d+$/.test(last) ? '[' + last + ']' : last, path, count: 0, children: [], leaves: [] };
+    parent.children.push(node);
+    byPath.set(path, node);
+    return node;
+  };
+  for (const p of fields.keys()) ensure(p);
+  for (const [p, c] of fields) { const n = byPath.get(p); if (n) n.count = c; }
+  const computeLeaves = n => {
+    if (n.children.length === 0) { n.leaves = n.path ? [n.path] : []; return; }
+    n.leaves = [];
+    n.children.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    for (const c of n.children) { computeLeaves(c); n.leaves.push(...c.leaves); }
+  };
+  computeLeaves(root);
+  return root;
+}
+function getFieldTree() { if (!fieldTreeCache) fieldTreeCache = buildFieldTree(); return fieldTreeCache; }
+
+function nodeLeafState(node) {
+  if (node.leaves.length === 0) return 'off';
+  let on = 0;
+  for (const p of node.leaves) if (metaSelPaths.has(p)) on++;
+  if (on === 0) return 'off';
+  return on === node.leaves.length ? 'on' : 'partial';
+}
+function setNodeLeaves(node, on) { for (const p of node.leaves) { if (on) metaSelPaths.add(p); else metaSelPaths.delete(p); } }
+function toggleFieldNode(node) { setNodeLeaves(node, nodeLeafState(node) !== 'on'); commitMetaSel(); }
+function findFieldNode(root, path) {
+  if (root.path === path) return root;
+  for (const child of root.children) { const found = findFieldNode(child, path); if (found) return found; }
+  return null;
+}
+function toggleMetaField(path) {
+  const node = findFieldNode(getFieldTree(), path);
+  if (node) toggleFieldNode(node);
+  else if (metaSelPaths.has(path)) { metaSelPaths.delete(path); commitMetaSel(); }
+  else { metaSelPaths.add(path); commitMetaSel(); }
+}
+function getFieldStates() {
+  if (!fieldStateCache) {
+    const m = new Map();
+    const walk = n => { if (n.path) { const st = nodeLeafState(n); if (st !== 'off') m.set(n.path, st); } for (const c of n.children) walk(c); };
+    walk(getFieldTree());
+    fieldStateCache = m;
+  }
+  return fieldStateCache;
+}
+function metaKeyStateCls(path) {
+  const st = getFieldStates().get(path);
+  return st === 'on' ? ' meta-key-on' : st === 'partial' ? ' meta-key-partial' : '';
+}
+function fieldNodeMatches(node, q) {
+  if (!q) return true;
+  if (node.name.toLowerCase().includes(q) || node.path.toLowerCase().includes(q)) return true;
+  return node.children.some(c => fieldNodeMatches(c, q));
+}
+function renderFieldNode(node, depth, q) {
+  if (!fieldNodeMatches(node, q)) return '';
+  const state = nodeLeafState(node);
+  const hasKids = node.children.length > 0;
+  const collapsed = metaCollapsed.has(node.path);
+  const caret = hasKids
+    ? '<span class="mpo-caret" data-caret="' + escAttr(node.path) + '">' + (collapsed ? '&#9654;' : '&#9660;') + '</span>'
+    : '<span class="mpo-caret mpo-caret-empty"></span>';
+  let html = '<div class="mpo-node" style="padding-left:' + (depth * 14) + 'px">' + caret +
+    '<label class="mpo-lbl"><input type="checkbox" data-path="' + escAttr(node.path) + '"' +
+    (state === 'on' ? ' checked' : '') + ' data-partial="' + (state === 'partial' ? '1' : '0') + '" />' +
+    '<span class="mpo-name">' + escMetaText(node.name) + '</span></label>' +
+    '<span class="mpo-count">' + node.count + '</span></div>';
+  if (hasKids && !collapsed) for (const c of node.children) html += renderFieldNode(c, depth + 1, q);
+  return html;
 }
 
 let metaPopEl = null;
-let metaPopOpen = false;
-let metaPopAnchor = null;
-
 function ensureMetaPop() {
   if (metaPopEl) return metaPopEl;
-  metaPopEl = document.createElement('div');
-  metaPopEl.className = 'meta-pop';
-  metaPopEl.innerHTML =
-    '<div class="mpo-head"><span class="mpo-title">Fields</span>' +
-      '<button class="btn fp-none mpo-clear">Clear</button>' +
-      '<button class="mpo-x" title="Close">&times;</button></div>' +
-    '<input class="mpo-search" type="text" placeholder="Search fields…" autocomplete="off">' +
+  const pop = document.createElement('div');
+  pop.className = 'meta-pop';
+  pop.innerHTML =
+    '<div class="mpo-head"><span class="mpo-title">Select fields</span><button class="mpo-x" title="Close">&times;</button></div>' +
+    '<input class="mpo-search" type="text" placeholder="Filter fields…" autocomplete="off" />' +
     '<div class="mpo-list"></div>' +
-    '<div class="mpo-foot">Check fields to show them on every row. Uncheck all to go back to the full JSON.</div>';
-  document.body.appendChild(metaPopEl);
-
-  const list = metaPopEl.querySelector('.mpo-list');
-  const search = metaPopEl.querySelector('.mpo-search');
-
-  metaPopEl.querySelector('.mpo-x').addEventListener('click', closeMetaPop);
-  metaPopEl.querySelector('.mpo-clear').addEventListener('click', () => { clearMetaSel(); refreshMetaPopChecks(); });
-  metaPopEl.querySelector('.mpo-search').addEventListener('input', () => {
-    const q = search.value.toLowerCase();
-    for (const row of list.querySelectorAll('.mpo-item')) {
-      row.style.display = row.dataset.path.toLowerCase().includes(q) ? '' : 'none';
-    }
-  });
-  list.addEventListener('change', e => {
-    const row = e.target.closest('.mpo-item');
-    if (!row) return;
-    const p = row.dataset.path;
-    if (e.target.checked) metaSelPaths.add(p);
-    else metaSelPaths.delete(p);
-    refreshAllMetaBodies();
-    refreshMetaPopChecks();
-  });
+    '<div class="mpo-foot"><button class="mpo-clear">Clear all</button></div>';
+  pop.querySelector('.mpo-x').addEventListener('click', closeMetaPop);
+  pop.querySelector('.mpo-clear').addEventListener('click', clearMetaSel);
+  const inp = pop.querySelector('.mpo-search');
+  inp.addEventListener('input', () => buildMetaPopList(pop, inp.value));
+  document.body.appendChild(pop);
   document.addEventListener('pointerdown', e => {
-    if (!metaPopOpen) return;
-    if (metaPopEl.contains(e.target)) return;
-    if (metaPopAnchor && metaPopAnchor.contains(e.target)) return;
+    if (!pop.classList.contains('open')) return;
+    if (pop.contains(e.target)) return;
+    if (e.target.closest && e.target.closest('.meta-pill')) return;
     closeMetaPop();
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMetaPop(); });
-  return metaPopEl;
+  metaPopEl = pop;
+  return pop;
 }
-
-function refreshMetaPopChecks() {
-  if (!metaPopEl) return;
-  const list = metaPopEl.querySelector('.mpo-list');
-  for (const row of list.querySelectorAll('.mpo-item')) {
-    row.querySelector('input').checked = metaSelPaths.has(row.dataset.path);
-  }
-}
-
-function buildMetaPopList() {
-  const pop = ensureMetaPop();
+function buildMetaPopList(pop, filter) {
+  metaPopFilter = filter;
   const list = pop.querySelector('.mpo-list');
-  pop.querySelector('.mpo-search').value = '';
-  const fields = discoverMetaFields();
-  list.innerHTML = fields.length
-    ? fields.map(([p, count]) =>
-        '<label class="mpo-item" data-path="' + escAttr(p) + '">' +
-          '<input type="checkbox">' +
-          '<span class="mpo-name" title="' + escAttr(p) + '">' + escMetaText(p) + '</span>' +
-          '<span class="mpo-count">' + count + '</span>' +
-        '</label>').join('')
-    : '<div class="mpo-empty">No paired JSON found — load audio with .json files first.</div>';
-  refreshMetaPopChecks();
-}
-
-function openMetaPop(anchor) {
-  metaPopAnchor = anchor;
-  buildMetaPopList();
-  const pop = ensureMetaPop();
-  const r = anchor.getBoundingClientRect();
-  pop.style.top = (r.bottom + 6 + window.scrollY) + 'px';
-  pop.style.left = Math.max(8, r.left + r.width - 330) + 'px';
-  pop.classList.add('open');
-  metaPopOpen = true;
-}
-function closeMetaPop() {
-  if (!metaPopEl || !metaPopOpen) return;
-  metaPopEl.classList.remove('open');
-  metaPopOpen = false;
+  const root = getFieldTree();
+  const q = (filter || '').trim().toLowerCase();
+  const allState = nodeLeafState(root);
+  const allRow = '<label class="mpo-item mpo-all"><input type="checkbox" data-all="1"' +
+    (allState === 'on' ? ' checked' : '') + ' data-partial="' + (allState === 'partial' ? '1' : '0') + '" />' +
+    '<span class="mpo-name">All fields</span><span class="mpo-count">' + root.leaves.length + '</span></label>';
+  let tree = '';
+  for (const c of root.children) tree += renderFieldNode(c, 0, q);
+  if (!tree) {
+    list.innerHTML = allRow + '<div class="mpo-empty">' + (q ? 'No matching fields' : 'No JSON fields loaded — open a .json first.') + '</div>';
+    return;
+  }
+  list.innerHTML = allRow + tree;
+  list.querySelectorAll('input[data-partial="1"]').forEach(cb => { cb.indeterminate = true; });
+  const allCb = list.querySelector('input[data-all]');
+  if (allCb) allCb.addEventListener('change', () => {
+    const on = nodeLeafState(root) === 'on';
+    setNodeLeaves(root, !on);
+    commitMetaSel();
+  });
+  list.querySelectorAll('input[data-path]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const node = findFieldNode(getFieldTree(), cb.dataset.path || '');
+      if (node) toggleFieldNode(node);
+    });
+  });
+  list.querySelectorAll('.mpo-caret[data-caret]').forEach(caret => {
+    caret.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      const p = caret.dataset.caret || '';
+      if (metaCollapsed.has(p)) metaCollapsed.delete(p); else metaCollapsed.add(p);
+      buildMetaPopList(pop, metaPopFilter);
+    });
+  });
 }
 function toggleMetaPop(anchor) {
-  if (metaPopOpen) closeMetaPop();
-  else openMetaPop(anchor);
+  const pop = ensureMetaPop();
+  if (pop.classList.contains('open')) { closeMetaPop(); return; }
+  buildMetaPopList(pop, '');
+  pop.classList.add('open');
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = Math.max(4, r.right - 320) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
 }
+function closeMetaPop() { if (metaPopEl) metaPopEl.classList.remove('open'); }
 
-function refreshAllMetaBodies() {
-  /* Only rewrite panels near the viewport; far-away ones are marked stale
-     and lazily re-rendered when scrolled to (keeps JSON clicks instant
-     even with hundreds of cards). */
-  metaPanelsMarkStale();
-  refreshMetaWindow();
-  updateMetaHeads();
+/* ---- standalone (unpaired) JSON cards ---- */
+const jsonCards = [];   /* { key, filePath, name, card, panel } */
+
+/** True when a meta key already has matching audio among live/pending items. */
+function isMetaKeyPaired(key) {
+  if (tracks.some(t => metaKeyOf(t.name, t.filePath) === key || metaKeyOf(t.name) === key)) return true;
+  for (const grp of pendingCards) for (const it of (grp.items || [])) {
+    if (metaKeyOf(it.name, it.filePath) === key || metaKeyOf(it.name) === key) return true;
+  }
+  return false;
 }
+/** Reconcile standalone JSON cards with the current tracks + metaMap. */
+function ensureStandaloneJsonCards() {
+  for (let i = jsonCards.length - 1; i >= 0; i--) {
+    const c = jsonCards[i];
+    if (!metaMap.has(c.key) || isMetaKeyPaired(c.key)) { if (c.card) c.card.remove(); jsonCards.splice(i, 1); }
+  }
+  const have = new Set(jsonCards.map(c => c.key));
+  for (const [key, text] of metaMap) {
+    if (have.has(key) || isMetaKeyPaired(key)) continue;
+    const filePath = metaSource.get(key) || undefined;
+    const base = filePath ? filePath.replace(/\\/g, '/').split('/').pop() || key : key;
+    const card = document.createElement('div');
+    card.className = 'card json-card';
+    const hdr = document.createElement('div');
+    hdr.className = 'card-header';
+    hdr.innerHTML = '<span class="card-title" title="' + escAttr(base) + '">' + escMetaText(base) + '</span>' +
+      '<button class="card-remove" title="Remove">&times;</button>';
+    hdr.querySelector('.card-remove').addEventListener('click', e => { e.stopPropagation(); removeJsonCard(key); });
+    card.appendChild(hdr);
+    const panel = buildMetaPanel();
+    panel.aside.classList.add('show');
+    card.appendChild(panel.aside);
+    setMetaBody(panel.body, text);
+    tracksBox.appendChild(card);
+    jsonCards.push({ key, filePath, name: base, card, panel });
+  }
+  setStandaloneJsonCardVisibility(metaVisible);
+}
+function removeJsonCard(key) {
+  const i = jsonCards.findIndex(c => c.key === key);
+  if (i < 0) return;
+  const c = jsonCards[i];
+  if (c.card) c.card.remove();
+  jsonCards.splice(i, 1);
+  metaMap.delete(key);
+  metaSource.delete(key);
+}
+function setStandaloneJsonCardVisibility(v) { for (const jc of jsonCards) jc.card.style.display = v ? '' : 'none'; }
 
+/* ---- viewport-scoped panel refresh ---- */
 function metaPanelsMarkStale() {
-  for (const t of tracks) {
-    if (t.metaPanel && t.metaPanel.body) t.metaPanel.body._metaLast = null;
-  }
-  for (const g of groups) {
-    if (g.metaPanel && g.metaPanel.body) g.metaPanel.body._metaLast = null;
-  }
+  for (const t of tracks) if (t.metaPanel && t.metaPanel.body) t.metaPanel.body._metaLast = null;
+  for (const g of groups) if (g.metaPanel && g.metaPanel.body) g.metaPanel.body._metaLast = null;
+  for (const jc of jsonCards) jc.panel.body._metaLast = null;
 }
-
 function metaElNearViewport(el) {
   if (!el) return true;
   const box = tracksBox;
@@ -3351,7 +3812,6 @@ function metaElNearViewport(el) {
   const er = el.getBoundingClientRect();
   return er.bottom >= br.top - 600 && er.top <= br.bottom + 600;
 }
-
 function refreshMetaWindow() {
   for (const t of tracks) {
     if (!t.metaPanel || !t.meta) continue;
@@ -3361,23 +3821,26 @@ function refreshMetaWindow() {
     const card = g.el;
     if (!card || !g.metaPanel) continue;
     if (!metaElNearViewport(card)) { g.metaPanel.body._metaLast = null; continue; }
-    let active = tracks.find(tr => tr.groupId === g.id && tr.id === activeTrackId);
-    if (!active) active = tracks.find(tr => tr.groupId === g.id);
+    const active = getActiveLaneOfGroup(g);
     setMetaBody(g.metaPanel.body, active ? active.meta : null);
   }
+  for (const jc of jsonCards) {
+    if (metaElNearViewport(jc.card)) setMetaBody(jc.panel.body, metaMap.get(jc.key) ?? null);
+  }
 }
-
 function refreshMetaPanels() {
   /* keep only viewport-near groups in sync (called on lane selection) */
   for (const g of groups) {
     const card = g.el;
     if (!card || !g.metaPanel) continue;
     if (!metaElNearViewport(card)) { g.metaPanel.body._metaLast = null; continue; }
-    let active = tracks.find(t => t.groupId === g.id && t.id === activeTrackId);
-    if (!active) active = tracks.find(t => t.groupId === g.id);
+    const active = getActiveLaneOfGroup(g);
     setMetaBody(g.metaPanel.body, active ? active.meta : null);
   }
 }
+
+/* Rebuild any JSON with no matching audio at all (called after ingest). */
+function markUnpairedMeta() { ensureStandaloneJsonCards(); }
 
 /* lazy refresh of JSON panels as the user scrolls */
 let metaScrollRaf = 0;
@@ -3389,7 +3852,8 @@ function onMetaScroll() {
     refreshMetaWindow();
     if (metaVisible) {
       for (const t of tracks) {
-        if (!t.loaded || !t.wrapper || !t.canvas) continue;
+        if (!t.loaded) continue;
+        if (!isMultiTrack(t) && (!t.wrapper || !t.canvas)) continue;
         if (metaElNearViewport(t.el)) ensureTrackCanvasWidth(t);
       }
     }
@@ -3398,7 +3862,20 @@ function onMetaScroll() {
 
 /* Reflow already-decoded canvases after the meta panel changes layout width */
 function ensureTrackCanvasWidth(t) {
-  if (!t.loaded || !t.wrapper || !t.canvas) return;
+  if (!t.loaded) return;
+  if (isMultiTrack(t)) {
+    for (let i = 0; i < t.chViews.length; i++) {
+      const ch = t.chViews[i];
+      const w = ch.wrapper ? ch.wrapper.clientWidth : 0;
+      if (w <= 0 || !ch.canvas || w === ch.canvas.width) continue;
+      ch.canvas.width = w;
+      if (ch.canvas._h) ch.canvas.height = ch.canvas._h;
+      if (ch.waveformCanvas) { ch.waveformCanvas.width = w; if (ch.waveformCanvas._h) ch.waveformCanvas.height = ch.waveformCanvas._h; }
+      if (ch.specData) { drawSpec(t, i); if (waveformVisible && ch.waveformCanvas) drawWaveform(t, i); }
+    }
+    return;
+  }
+  if (!t.wrapper || !t.canvas) return;
   const w = t.wrapper.clientWidth;
   if (w > 0 && t.canvas.width !== w) {
     t.canvas.width = w;
@@ -3418,7 +3895,8 @@ function ensureTrackCanvasWidth(t) {
 function sizeAndRedrawLoaded() {
   /* only viewport-near canvases need reflowing; far ones are fixed on scroll */
   for (const t of tracks) {
-    if (!t.loaded || !t.wrapper || !t.canvas) continue;
+    if (!t.loaded) continue;
+    if (!isMultiTrack(t) && (!t.wrapper || !t.canvas)) continue;
     if (metaElNearViewport(t.el)) ensureTrackCanvasWidth(t);
   }
 }
@@ -3467,7 +3945,12 @@ function scheduleGeometry() {
 function setMetaVisible(visible) {
   metaVisible = visible;
   if (!visible) closeMetaPop();
+  if (visible) ensureStandaloneJsonCards();
+  setStandaloneJsonCardVisibility(visible);
+  closeMetaPop();
   updateMetaHeads();
+  /* Defer one frame: the toggle changes layout via a class/display change, so
+     measuring width synchronously can still read the pre-toggle width. */
   requestAnimationFrame(() => {
     if (visible) {
       applyMetaGeometry();
@@ -3819,10 +4302,17 @@ function addFreqLabels(el, ny) {
  *  UI
  * ======================================================================== */
 function clearAll() {
+  clearEpoch++;              /* invalidate queued/in-flight lazy loads */
+  groupingBusy = false;
   stopAll();
   paintObserver.disconnect();
   tracks.forEach(t => { if(t.el) t.el.remove(); });
   groups.forEach(g => { if(g.el) g.el.remove(); });
+  for (const jc of jsonCards) if (jc.card) jc.card.remove();
+  jsonCards.length = 0;
+  metaMap.clear();
+  metaSource.clear();
+  invalidateFieldContent();
   tracks=[]; groups=[]; activeTrackId=null;
   loadQueue.length = 0; activeLoads = 0;
   lazyObserver.disconnect();
@@ -3839,10 +4329,113 @@ function refreshUI() {
   dropZone.querySelector('.dz-text').textContent =
     has ? '+ Add more audio files or archives' : 'Drop audio files or .tar/.tar.gz archives here, or click to browse';
   btnPlay.disabled = !has; btnStop.disabled = !has; btnZoomIn.disabled = !has; btnZoomOut.disabled = !has; btnZoomFit.disabled = !has; btnAnalyzeAll.disabled = !has;
+  updateGroupingUI();
   highlightActive(); updateLaneHighlights(); updateTimeDisplay();
+  ensureStandaloneJsonCards();
+  showMetaNear();
 }
 
 function setActive(id) { activeTrackId=id; highlightActive(); updateLaneHighlights(); updateTimeDisplay(); refreshMetaPanels(); }
+
+/* ========================================================================
+ *  AUTO-GROUPING TOGGLE
+ *  Partitioning helper + in-place regroup (on) / split (off), chunked so many
+ *  cards don't block the UI.
+ * ======================================================================== */
+function groupItems(items) {
+  return autoGroup ? groupByBaseName(items) : items.map(it => ({ baseName: it.name, items: [it] }));
+}
+
+function updateGroupingUI() {
+  if (!btnGrouping) return;
+  btnGrouping.disabled = tracks.length === 0 || groupingBusy;
+  btnGrouping.textContent = groupingBusy ? 'Working…' : (autoGroup ? 'Grouping: On' : 'Grouping: Off');
+  btnGrouping.classList.toggle('active', autoGroup);
+}
+
+/* Drop windowed descriptors whose card is no longer in the DOM. */
+function pruneRenderedCards() {
+  renderedCards = renderedCards.filter(d => d._el && d._el.isConnected);
+}
+
+/* off → on: rejoin visible standalone cards into diff groups in place. */
+function rebuildAll() {
+  const standalones = tracks.filter(t => t.groupId == null && t.buffer && !t.isMulti);
+  if (!standalones.length) { groupingBusy = false; updateGroupingUI(); return; }
+  const items = standalones.map(t => ({ name: t.name, buffer: t.buffer, nativeSR: t.nativeSR, file: t.file, filePath: t.filePath, meta: t.meta }));
+  const plans = [];
+  for (const g of groupByBaseName(items)) {
+    if (g.items.length < 2) continue;
+    const trs = [];
+    let ok = true;
+    for (const it of g.items) {
+      const t = standalones.find(s => s.name === it.name && (s.filePath || null) === (it.filePath || null));
+      if (!t || !t.el) { ok = false; break; }
+      trs.push(t);
+    }
+    if (ok) plans.push({ stem: g.baseName, items: g.items, tracks: trs });
+  }
+  if (!plans.length) { groupingBusy = false; updateGroupingUI(); return; }
+  groupingBusy = true; updateGroupingUI();
+  let idx = 0;
+  const step = () => {
+    if (!groupingBusy) return;
+    try {
+      let done = 0;
+      while (idx < plans.length && done < 4) {
+        const p = plans[idx++]; done++;
+        const anchor = insertPlaceholderBefore(p.tracks[0].el);
+        for (const t of p.tracks) removeTrackQuietly(t.id);
+        pruneRenderedCards();
+        const el = createDiffGroup(p.stem, p.items);
+        placeCardAtPosition(anchor);
+        if (el) renderedCards.push({ baseName: p.stem, items: p.items, _el: el });
+      }
+    } catch (e) { console.error('rebuildAll error:', e); }
+    if (idx < plans.length) { setTimeout(step, 0); return; }
+    groupingBusy = false; updateGroupingUI(); refreshUI(); updateSentinels();
+  };
+  setTimeout(step, 0);
+}
+
+/* on → off: split every diff group into standalone cards in place. */
+function splitAllGroups() {
+  if (!groups.length) { groupingBusy = false; updateGroupingUI(); return; }
+  groupingBusy = true; updateGroupingUI();
+  const gs = groups.slice();
+  let idx = 0;
+  const step = () => {
+    if (!groupingBusy) return;
+    try {
+      let done = 0;
+      while (idx < gs.length && done < 4) {
+        const grp = gs[idx++]; done++;
+        if (!groups.some(g => g.id === grp.id)) continue;
+        const members = grp.trackIds.map(id => tracks.find(t => t.id === id)).filter(Boolean)
+          .map(t => ({ name: t.name, buffer: t.buffer || null, nativeSR: t.nativeSR, file: t.file, filePath: t.filePath, meta: t.meta || null }));
+        const ph = insertPlaceholderBefore(grp.el);
+        removeDiffGroupQuietly(grp.id);
+        pruneRenderedCards();
+        for (const it of members) {
+          const el = createStandalone(it.name, it.buffer, it.nativeSR, it.file, it.filePath, it.meta);
+          if (el && ph.parentNode) tracksBox.insertBefore(el, ph);
+          if (el) renderedCards.push({ baseName: it.name, items: [it], _el: el });
+        }
+        ph.remove();
+      }
+    } catch (e) { console.error('splitAllGroups error:', e); }
+    if (idx < gs.length) { setTimeout(step, 0); return; }
+    groupingBusy = false; updateGroupingUI(); refreshUI(); updateSentinels();
+  };
+  setTimeout(step, 0);
+}
+
+function toggleAutoGroup() {
+  if (groupingBusy) return;
+  autoGroup = !autoGroup;
+  updateGroupingUI();
+  if (autoGroup) rebuildAll(); else splitAllGroups();
+}
 
 function moveToNextCard() {
   const cards = Array.from(tracksBox.children).filter(c => c.className !== 'scroll-sentinel');
@@ -3877,22 +4470,71 @@ function highlightActive() {
 /* ========================================================================
  *  PLAYBACK
  * ======================================================================== */
+/* Per-source routing nodes created for a per-channel mute play, so stopSource
+   can disconnect them and prevent leaks. */
+const activeRoutes = new WeakMap();   /* AudioBufferSourceNode -> { split, gains } */
+function teardownRoute(src) {
+  const route = activeRoutes.get(src);
+  if (!route) return;
+  activeRoutes.delete(src);
+  try { src.disconnect(); } catch (e) {}
+  try { route.split.disconnect(); } catch (e) {}
+  for (const g of route.gains) { try { g.disconnect(); } catch (e) {} }
+}
+/* Per-channel gain (0/1) from mute state. Returns null for mono (direct is
+   fine). 2+ channels always go through a splitter/mixer so all channels sum
+   into the mix. */
+function channelGains(t) {
+  const n = t.buffer.numberOfChannels;
+  if (n <= 1) return null;
+  const g = [];
+  for (let c = 0; c < n; c++) g.push(t.mutedCh.has(c) ? 0 : 1);
+  return g;
+}
+
 function playSource(t, from) {
   if (!t.buffer) return;    /* not yet decoded */
   if (t.playing) stopSource(t);
   t.offset=from; t.startTime=audioCtx.currentTime;
   const src=audioCtx.createBufferSource();
-  src.buffer=t.buffer; src.connect(gainNode); src.start(0,from);
+  src.buffer=t.buffer;
+  const gains = channelGains(t);
+  if (gains) {
+    const n = t.buffer.numberOfChannels;
+    const split = audioCtx.createChannelSplitter(n);
+    const chGains = [];
+    for (let c = 0; c < n; c++) {
+      const g = audioCtx.createGain();
+      g.gain.value = gains[c];
+      split.connect(g, c);
+      g.connect(gainNode);
+      chGains.push(g);
+    }
+    src.connect(split);
+    activeRoutes.set(src, { split, gains: chGains });
+  } else {
+    src.connect(gainNode);
+  }
+  src.start(0,from);
   t.source=src; t.playing=true;
   src.onended = () => {
-    if(t.source===src){ t.offset=t.duration; t.playing=false; t.source=null;
+    if(t.source===src){ teardownRoute(src); t.offset=t.duration; t.playing=false; t.source=null;
       updateTimeDisplay(); if(!tracks.some(tr=>tr.playing)) updatePlayBtn(false); }
   };
 }
 function stopSource(t) {
   if(!t.playing) return;
   t.offset=Math.min(t.offset+audioCtx.currentTime-t.startTime,t.duration);
+  if (t.source) teardownRoute(t.source);
   try{t.source.stop();}catch(e){} t.source=null; t.playing=false;
+}
+/* Rebuild the audio route when mute state changed during playback. */
+function applyChannelListen(t) {
+  if (!t.buffer || t.buffer.numberOfChannels <= 1) return;
+  if (t.playing) {
+    const pos = Math.min(t.offset + audioCtx.currentTime - t.startTime, t.duration);
+    playSource(t, pos);
+  }
 }
 async function playActive() {
   const t=getActive(); if(!t) return;
@@ -3984,7 +4626,29 @@ function getPos(t) { return t.playing ? Math.min(t.offset+audioCtx.currentTime-t
 
 function updatePlayheads() {
   for (const t of tracks) {
-    if (!t.canvas || !t.ph || !t.loaded) continue;
+    if (!t.loaded) continue;
+    if (isMultiTrack(t)) {
+      const pos = getPos(t);
+      const span = t.viewEnd - t.viewStart;
+      const visible = !(pos < t.viewStart || pos > t.viewEnd);
+      for (const ch of t.chViews) {
+        if (!ch.canvas || !ch.ph) continue;
+        if (!visible) {
+          if (ch.ph.style.display !== 'none') { ch.ph.style.display = 'none'; if (ch.waveformPh) ch.waveformPh.style.display = 'none'; }
+          continue;
+        }
+        if (ch.ph.style.display === 'none') { ch.ph.style.display = ''; if (ch.waveformPh) ch.waveformPh.style.display = ''; }
+        const frac = (pos - t.viewStart) / span;
+        const px = frac * ch.wrapper.clientWidth;
+        ch.ph.style.transform = 'translateX(' + px + 'px)';
+        if (ch.waveformPh) {
+          const wfPx = frac * (ch.waveformWrapper ? ch.waveformWrapper.clientWidth : px);
+          ch.waveformPh.style.transform = 'translateX(' + wfPx + 'px)';
+        }
+      }
+      continue;
+    }
+    if (!t.canvas || !t.ph) continue;
     const pos = getPos(t);
     const span = t.viewEnd - t.viewStart;
     if (pos < t.viewStart || pos > t.viewEnd) {
@@ -4456,6 +5120,7 @@ btnZoomIn.addEventListener('click', zoomIn);
 btnZoomOut.addEventListener('click', zoomOut);
 btnZoomFit.addEventListener('click', zoomFit);
 btnAnalyzeAll.addEventListener('click', () => { runAnalysisAll(tracks); });
+btnGrouping.addEventListener('click', toggleAutoGroup);
 const chkWaveform = document.getElementById('chk-waveform');
 chkWaveform.addEventListener('change', () => { setWaveformVisible(chkWaveform.checked); });
 const chkMeta = document.getElementById('chk-meta');
