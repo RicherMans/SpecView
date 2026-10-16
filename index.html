@@ -1470,6 +1470,7 @@ function updateCardInfo(cardEl) {
  * ======================================================================== */
  const TAR_EXT  = /\.(tar|tar\.gz|tgz)$/i;
  const AUDIO_RE = /\.(mp3|wav|ogg|flac|m4a|aac|webm|wma|aiff|opus)$/i;
+ const SNIFF_LEN = 64;      /* magic-byte head sampled for unknown extensions */
  const META_RE   = /\.json$/i;
  const META_MAX  = 1 << 20;   /* skip huge .json payloads (metadata only) */
 
@@ -1484,6 +1485,30 @@ function guessAudioMime(name) {
     opus: 'audio/opus'
   };
   return map[ext.toLowerCase()] || 'audio/unknown';
+}
+
+/* Content-based audio detection via magic bytes (integer compares only —
+   what `file`/ffprobe do). Used when the filename extension is unknown,
+   e.g. webdataset shards whose audio payloads are named *.audio. Returns
+   a MIME type or null. */
+function sniffAudioMagic(b) {
+  if (!b || b.length < 4) return null;
+  if (b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) return 'audio/mpeg';          /* ID3 */
+  if (b[0] === 0xff && (b[1] & 0xe0) === 0xe0)                                      /* MPEG/ADTS sync */
+    return ((b[1] >> 1) & 3) === 0 ? 'audio/aac' : 'audio/mpeg';                     /* layer 00 = ADTS AAC */
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&           /* RIFF....WAVE */
+      b.length >= 12 && b[8] === 0x57 && b[9] === 0x41 && b[10] === 0x56 && b[11] === 0x45) return 'audio/wav';
+  if (b[0] === 0x66 && b[1] === 0x4c && b[2] === 0x61 && b[3] === 0x43) return 'audio/flac';  /* fLaC */
+  if (b[0] === 0x4f && b[1] === 0x67 && b[2] === 0x67 && b[3] === 0x53) return 'audio/ogg';   /* OggS */
+  if (b[0] === 0x46 && b[1] === 0x4f && b[2] === 0x52 && b[3] === 0x4d &&           /* FORM....AIFF/C */
+      b.length >= 12 && b[8] === 0x41 && b[9] === 0x49 && b[10] === 0x46 && (b[11] === 0x46 || b[11] === 0x43)) return 'audio/aiff';
+  if (b.length >= 12 && b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) {  /* ftyp */
+    const brand = String.fromCharCode(b[8], b[9], b[10], b[11]);
+    if (brand === 'M4A ' || brand === 'M4B ' || brand === 'mp42' || brand === 'isom' || brand === 'mp41') return 'audio/mp4';
+  }
+  if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return 'audio/webm';  /* EBML */
+  if (b[0] === 0x23 && b[1] === 0x21 && b[2] === 0x41 && b[3] === 0x4d && b.length > 4 && b[4] === 0x52) return 'audio/amr';  /* #!AMR */
+  return null;
 }
 
 /* Streaming tar reader (shared by the live-display pass and the
@@ -1517,6 +1542,7 @@ function createTarReader(opts) {
   let metaOnDone = null;
   let pendingLongName = null, pendingPaxPath = null;
   let pendingAudio = null;         /* audio record waiting for its payload to pass */
+  let pendingSniff = null;         /* unknown-ext record waiting for magic-byte sniff */
   let seqCount = 0;                /* audio headers seen (seq identity) */
   let audioEmitted = 0;
 
@@ -1605,6 +1631,35 @@ function createTarReader(opts) {
     return out;
   }
 
+  /* Decide audio-vs-other from the buffered head bytes of an unknown-ext
+     entry. The head stays buffered as the payload prefix when it is audio. */
+  function resolveSniff() {
+    const rec = pendingSniff; pendingSniff = null;
+    let head = null;
+    if (rec && dataLen > 0) {
+      if (dataParts.length === 1) head = dataParts[0];
+      else {
+        head = new Uint8Array(dataLen);
+        let o = 0;
+        for (const p of dataParts) { head.set(p, o); o += p.length; }
+      }
+    }
+    const mime = head ? sniffAudioMagic(head) : null;
+    if (mime && rec) {
+      rec.seq = seqCount++;
+      pendingAudio = rec;
+      if (!!captureAudio && captureAudio(rec.seq)) {
+        mode = 'audioCapture';          /* keep head bytes as payload prefix */
+      } else {
+        mode = 'skip';                  /* end handler emits bytes:null */
+        dataParts = null; dataLen = 0;
+      }
+    } else {
+      mode = 'skip';
+      dataParts = null; dataLen = 0;
+    }
+  }
+
   function handleHeader(h) {
     const type = String.fromCharCode(h[156]);
     const size = readSize(h);
@@ -1644,6 +1699,12 @@ function createTarReader(opts) {
     } else if (isJson) {
       curName = name;
       startPayload('json', size, null);
+    } else if (REGULAR.has(type) && size > 0) {
+      /* Unknown extension — decide by content (webdataset shards use bare
+         suffixes like .audio holding ordinary mp3/wav bytes) */
+      curName = name;
+      pendingSniff = { seq: -1, name, path: name, size };
+      startPayload('sniff', size, null);
     } else {
       curName = '';
       startPayload('skip', size, null);
@@ -1700,8 +1761,13 @@ function createTarReader(opts) {
       }
 
       while (state === 'payload' && bufLen > 0 && need > 0) {
-        const m = Math.min(bufLen, need);
-        const copy = Math.min(m, dataLeft);
+        let m = Math.min(bufLen, need);
+        let copy = Math.min(m, dataLeft);
+        if (mode === 'sniff') {
+          const room = SNIFF_LEN - dataLen;
+          if (copy > room) { copy = room; m = room; }   /* stop at the sniff head */
+          if (copy <= 0) { resolveSniff(); continue; }
+        }
         if (copy > 0 && mode !== 'skip') {
           dataParts.push(buf.subarray(0, copy));
           dataLen += copy;
@@ -1709,11 +1775,13 @@ function createTarReader(opts) {
         consume(m);
         need -= m;
         dataLeft -= copy;
+        if (mode === 'sniff' && (dataLen >= SNIFF_LEN || dataLeft <= 0)) resolveSniff();
       }
       if (state !== 'payload') continue;
       if (need > 0) break;
 
       /* payload finished */
+      if (mode === 'sniff') resolveSniff();
       if (mode === 'audioCapture') {
         const rec = pendingAudio; pendingAudio = null;
         onAudio({ seq: rec.seq, name: rec.name, path: rec.path, size: rec.size, bytes: partsToBytes() });
@@ -2164,10 +2232,16 @@ async function buildMetaMap(jsonList) {
 async function handleFiles(fileList, metaFiles) {
   const ext = /\.(mp3|wav|ogg|flac|m4a|aac|webm|wma|aiff|opus)$/i;
 
-  /* Collect audio files only */
+  /* Collect audio files only. Unknown extensions are sniffed by content
+     (webdataset-style *.audio files etc.) — a 64-byte head read, no decode. */
   const audioFiles = [];
   for (const f of fileList) {
-    if (f.type.startsWith('audio/') || ext.test(f.name)) audioFiles.push(f);
+    if (f.type.startsWith('audio/') || ext.test(f.name)) { audioFiles.push(f); continue; }
+    if (META_RE.test(f.name) || !f.size) continue;
+    try {
+      const head = new Uint8Array(await f.slice(0, SNIFF_LEN).arrayBuffer());
+      if (sniffAudioMagic(head)) audioFiles.push(f);
+    } catch (e) { console.error('Sniff error:', f.name, e); }
   }
   if (!audioFiles.length) return;
 
