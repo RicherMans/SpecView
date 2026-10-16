@@ -895,6 +895,14 @@ function shouldPin(d) {
 function fixActiveTrack() {
   if (activeTrackId && !tracks.some(t => t.id === activeTrackId)) activeTrackId = null;
 }
+/* Release decoded PCM a recycled descriptor holds. Items that kept their File
+   / archive handle drop their AudioBuffer and re-decode when their card is
+   restored; eager items (no file) keep theirs — bounded by the eager caps. */
+function releaseDescriptorBuffers(d) {
+  for (const it of (d.items || [])) {
+    if (it.buffer && it.file) it.buffer = null;
+  }
+}
 function recycleTop() {
   while (renderedCards.length > MAX_RENDERED) {
     const d = renderedCards.shift();
@@ -902,6 +910,7 @@ function recycleTop() {
     if (shouldPin(d)) { renderedCards.unshift(d); break; }
     removeCardByEl(d._el);
     d._el = null;
+    releaseDescriptorBuffers(d);
     releasedTop.push(d);
   }
   fixActiveTrack();
@@ -936,6 +945,7 @@ function restoreTop(count) {
   while (renderedCards.length > MAX_RENDERED) {
     const d = renderedCards.pop();
     if (d._el) { removeCardByEl(d._el); d._el = null; }
+    releaseDescriptorBuffers(d);
     pendingCards.unshift(d);
   }
   fixActiveTrack();
@@ -1346,7 +1356,8 @@ async function loadTrack(t) {
     t.renderSR = decoded.sampleRate;
     t.nyquist  = t.sr / 2;
     t.viewEnd  = decoded.duration;
-    t.file     = null;
+    /* keep t.file: recycled cards re-decode from it when restored (it is a
+       lightweight handle for archive entries, or a browser-backed File) */
 
     /* Multichannel (2–8ch): expand to per-channel lanes. Such files never stay
        in a diff group — split them out into standalone cards. */
@@ -2345,12 +2356,13 @@ function removeDiffGroupQuietly(gid) {
  * ======================================================================== */
 function stripExt(n) { return n.replace(/\.[^.]+$/, ''); }
 
+/* KNOWN_TAGS sorted longest-first, computed once ('ground_truth' beats 'gt'). */
+const KNOWN_TAGS_SORTED = KNOWN_TAGS.slice().sort((a,b) => b.length - a.length);
+
 function extractTag(noExt) {
   const low = noExt.toLowerCase();
-  /* sort longest first so 'ground_truth' beats 'gt' */
-  const sorted = KNOWN_TAGS.slice().sort((a,b) => b.length - a.length);
 
-  for (const tag of sorted) {
+  for (const tag of KNOWN_TAGS_SORTED) {
     /* suffix: stem_tag  or  stem-tag */
     const sufPat1 = '_' + tag;
     const sufPat2 = '-' + tag;
@@ -2688,22 +2700,43 @@ function setTrackView(track, start, end) {
   if (track.viewEnd - track.viewStart < span && track.viewStart > 0)
     track.viewStart = Math.max(0, track.viewEnd - span);
 }
+/* Coalesce high-frequency redraw requests (wheel zoom/pan) into one rAF frame:
+   the last view window wins and each track is re-rasterized at most once. */
+const redrawQueue = new Set();
+let redrawRafId = 0;
+function scheduleTrackRedraw(track) {
+  redrawQueue.add(track);
+  if (!redrawRafId) redrawRafId = requestAnimationFrame(flushTrackRedraws);
+}
+function flushTrackRedraws() {
+  redrawRafId = 0;
+  const list = Array.from(redrawQueue);
+  redrawQueue.clear();
+  const done = new Set();
+  for (const track of list) {
+    if (!isTrackAlive(track) || done.has(track)) continue;
+    redrawTrack(track); updateRuler(track); done.add(track);
+    if (track.groupId != null) {
+      for (const s of getSiblings(track)) {
+        if (s.id === track.id || done.has(s)) continue;
+        redrawTrack(s); updateRuler(s); done.add(s);
+      }
+    }
+  }
+  if (done.size) updatePlayheads();
+}
 function applyZoom(track, anchorRatio, factor) {
   const span = track.viewEnd - track.viewStart;
   const anchorTime = track.viewStart + anchorRatio * span;
   let newSpan = Math.max(MIN_VIEW_SPAN, Math.min(track.duration, span * factor));
   setTrackView(track, anchorTime - anchorRatio * newSpan, anchorTime - anchorRatio * newSpan + newSpan);
-  syncGroupZoom(track); redrawTrack(track); updateRuler(track);
-  if (track.groupId != null) { const sibs = getSiblings(track); for (const s of sibs) { if (s.id !== track.id) { redrawTrack(s); updateRuler(s); } } }
-  updatePlayheads();
+  syncGroupZoom(track); scheduleTrackRedraw(track);
 }
 function applyPan(track, shift) {
   const span = track.viewEnd - track.viewStart;
   let ns = Math.max(0, Math.min(track.duration - span, track.viewStart + shift));
   setTrackView(track, ns, ns + span);
-  syncGroupZoom(track); redrawTrack(track); updateRuler(track);
-  if (track.groupId != null) { const sibs = getSiblings(track); for (const s of sibs) { if (s.id !== track.id) { redrawTrack(s); updateRuler(s); } } }
-  updatePlayheads();
+  syncGroupZoom(track); scheduleTrackRedraw(track);
 }
 function syncGroupZoom(track) {
   if (track.groupId == null) return;
@@ -2774,13 +2807,15 @@ function drawWaveform(track, chIndex) {
   ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
   ctx.strokeStyle = '#4a9eff'; ctx.lineWidth = 1;
+  ctx.beginPath();
   for (let x = 0; x < W; x++) {
     const sStart = Math.floor(startSample + x * samplesPerPixel);
     const sEnd = Math.min(nS, Math.ceil(startSample + (x+1) * samplesPerPixel));
     let min = 1, max = -1;
     for (let s = sStart; s < sEnd; s++) { const v = raw[s]; if (v < min) min = v; if (v > max) max = v; }
-    ctx.beginPath(); ctx.moveTo(x, mid - max * mid); ctx.lineTo(x, mid - min * mid); ctx.stroke();
+    ctx.moveTo(x, mid - max * mid); ctx.lineTo(x, mid - min * mid);
   }
+  ctx.stroke();
 }
 
 function setWaveformVisible(visible) {
@@ -3239,6 +3274,9 @@ function updateRuler(track) {
  *  PAIRED JSON — right-hand metadata panel
  * ======================================================================== */
 const META_SHOW_MAX = 120000;   /* cap displayed JSON length (chars) */
+/* Cap tree-rendered DOM lines per metadata panel (large arrays would create
+   100k+ nodes and freeze the panel render). */
+const META_TREE_MAX_LINES = 4000;
 
 function escMetaText(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -3449,6 +3487,7 @@ function metaLineHtml(depth, content) {
 /* Render a JSON value as a clickable tree using JSON-Pointer paths. Nested
    objects recurse; JSON encoded in strings (e.g. ACAV "caption") is expanded. */
 function renderTreeInto(v, depth, out, prefix) {
+  if (out.length >= META_TREE_MAX_LINES) return;
   if (v === null || typeof v !== 'object') {
     out.push(metaLineHtml(depth, '<span class="jv-' + jsonScalarCls(v) + '">' + escMetaText(String(v)) + '</span>'));
     return;
@@ -3508,6 +3547,8 @@ function metaBodyHtml(meta) {
   if (metaSelPaths.size === 0) {
     const out = [];
     renderTreeInto(unwrapRoot(parsed), 0, out, '');
+    if (out.length >= META_TREE_MAX_LINES)
+      out.push('<div class="json-line meta-truncated" style="color:#888">… truncated (' + META_TREE_MAX_LINES + ' line limit) …</div>');
     return out.join('');
   }
   const parts = [];
@@ -3753,24 +3794,30 @@ function closeMetaPop() { if (metaPopEl) metaPopEl.classList.remove('open'); }
 
 /* ---- standalone (unpaired) JSON cards ---- */
 const jsonCards = [];   /* { key, filePath, name, card, panel } */
+/* Bound DOM growth for archives containing many orphan .json files. */
+const JSON_CARD_CAP = 300;
 
-/** True when a meta key already has matching audio among live/pending items. */
-function isMetaKeyPaired(key) {
-  if (tracks.some(t => metaKeyOf(t.name, t.filePath) === key || metaKeyOf(t.name) === key)) return true;
-  for (const grp of pendingCards) for (const it of (grp.items || [])) {
-    if (metaKeyOf(it.name, it.filePath) === key || metaKeyOf(it.name) === key) return true;
-  }
-  return false;
+/** Both key variants (dir-qualified and bare-name) of every live/pending audio
+    item, so pairing checks are O(1) instead of rescanning the whole queue. */
+function collectPairedMetaKeys() {
+  const paired = new Set();
+  const add = (name, filePath) => { paired.add(metaKeyOf(name, filePath)); paired.add(metaKeyOf(name)); };
+  for (const t of tracks) add(t.name, t.filePath);
+  for (const grp of pendingCards) for (const it of (grp.items || [])) add(it.name, it.filePath);
+  return paired;
 }
+
 /** Reconcile standalone JSON cards with the current tracks + metaMap. */
 function ensureStandaloneJsonCards() {
+  const paired = collectPairedMetaKeys();
   for (let i = jsonCards.length - 1; i >= 0; i--) {
     const c = jsonCards[i];
-    if (!metaMap.has(c.key) || isMetaKeyPaired(c.key)) { if (c.card) c.card.remove(); jsonCards.splice(i, 1); }
+    if (!metaMap.has(c.key) || paired.has(c.key)) { if (c.card) c.card.remove(); jsonCards.splice(i, 1); }
   }
   const have = new Set(jsonCards.map(c => c.key));
   for (const [key, text] of metaMap) {
-    if (have.has(key) || isMetaKeyPaired(key)) continue;
+    if (have.has(key) || paired.has(key)) continue;
+    if (jsonCards.length >= JSON_CARD_CAP) break;
     const filePath = metaSource.get(key) || undefined;
     const base = filePath ? filePath.replace(/\\/g, '/').split('/').pop() || key : key;
     const card = document.createElement('div');
@@ -4628,58 +4675,43 @@ function startAnim() {
 function getPos(t) { return t.playing ? Math.min(t.offset+audioCtx.currentTime-t.startTime,t.duration) : t.offset; }
 
 function updatePlayheads() {
+  /* Read phase: gather positions and widths for every loaded track first so the
+     frame does at most ONE layout flush, then write all styles — avoids the
+     per-lane read/write/read thrash during playback. */
+  const jobs = [];
   for (const t of tracks) {
     if (!t.loaded) continue;
+    const pos = getPos(t);
+    const span = t.viewEnd - t.viewStart;
+    const visible = !(pos < t.viewStart || pos > t.viewEnd);
     if (isMultiTrack(t)) {
-      const pos = getPos(t);
-      const span = t.viewEnd - t.viewStart;
-      const visible = !(pos < t.viewStart || pos > t.viewEnd);
       for (const ch of t.chViews) {
         if (!ch.canvas || !ch.ph) continue;
-        if (!visible) {
-          if (ch.ph.style.display !== 'none') { ch.ph.style.display = 'none'; if (ch.waveformPh) ch.waveformPh.style.display = 'none'; }
-          continue;
-        }
-        if (ch.ph.style.display === 'none') { ch.ph.style.display = ''; if (ch.waveformPh) ch.waveformPh.style.display = ''; }
+        if (!visible) { jobs.push({ ph: ch.ph, wf: ch.waveformPh, hide: true }); continue; }
         const frac = (pos - t.viewStart) / span;
         const px = frac * ch.wrapper.clientWidth;
-        ch.ph.style.transform = 'translateX(' + px + 'px)';
-        if (ch.waveformPh) {
-          const wfPx = frac * (ch.waveformWrapper ? ch.waveformWrapper.clientWidth : px);
-          ch.waveformPh.style.transform = 'translateX(' + wfPx + 'px)';
-        }
+        const wfPx = ch.waveformPh ? frac * (ch.waveformWrapper ? ch.waveformWrapper.clientWidth : px) : 0;
+        jobs.push({ ph: ch.ph, wf: ch.waveformPh, hide: false, px, wfPx });
       }
       continue;
     }
     if (!t.canvas || !t.ph) continue;
-    const pos = getPos(t);
-    const span = t.viewEnd - t.viewStart;
-    if (pos < t.viewStart || pos > t.viewEnd) {
-      if (t._phOn) {
-        t._phOn = false;
-        t.ph.style.display = 'none';
-        if (t.waveformPh) t.waveformPh.style.display = 'none';
-      }
-      continue;
-    }
+    if (!visible) { jobs.push({ ph: t.ph, wf: t.waveformPh, hide: true }); continue; }
     const frac = (pos - t.viewStart) / span;
     const px = frac * t.wrapper.clientWidth;
-    if (!t._phOn) {
-      t._phOn = true;
-      t.ph.style.display = '';
-      if (t.waveformPh) t.waveformPh.style.display = '';
+    const wfPx = t.waveformPh ? frac * (t.waveformWrapper ? t.waveformWrapper.clientWidth : t.wrapper.clientWidth) : 0;
+    jobs.push({ ph: t.ph, wf: t.waveformPh, hide: false, px, wfPx });
+  }
+  for (const j of jobs) {
+    if (j.hide) {
+      if (j.ph.style.display !== 'none') { j.ph.style.display = 'none'; j.ph._phX = undefined; }
+      if (j.wf && j.wf.style.display !== 'none') { j.wf.style.display = 'none'; j.wf._phX = undefined; }
+      continue;
     }
-    if (t._phX !== px) {
-      t._phX = px;
-      t.ph.style.transform = 'translateX(' + px + 'px)';
-    }
-    if (t.waveformPh) {
-      const wfPx = frac * (t.waveformWrapper ? t.waveformWrapper.clientWidth : t.wrapper.clientWidth);
-      if (t._wfX !== wfPx) {
-        t._wfX = wfPx;
-        t.waveformPh.style.transform = 'translateX(' + wfPx + 'px)';
-      }
-    }
+    if (j.ph.style.display === 'none') j.ph.style.display = '';
+    if (j.wf && j.wf.style.display === 'none') j.wf.style.display = '';
+    if (j.ph._phX !== j.px) { j.ph._phX = j.px; j.ph.style.transform = 'translateX(' + j.px + 'px)'; }
+    if (j.wf && j.wf._phX !== j.wfPx) { j.wf._phX = j.wfPx; j.wf.style.transform = 'translateX(' + j.wfPx + 'px)'; }
   }
 }
 

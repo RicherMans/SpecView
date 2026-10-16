@@ -35,6 +35,9 @@ let playLabel: HTMLElement;
 // ========== PAIRED JSON METADATA ==========
 let metaVisible = false;
 const META_SHOW_MAX = 120000;   // cap displayed JSON length (chars)
+// Cap tree-rendered DOM lines per metadata panel (large arrays would create
+// 100k+ nodes and freeze the panel render).
+const META_TREE_MAX_LINES = 4000;
 const META_WIDTH_DEFAULT = 300;
 const META_WIDTH_MIN = 180;
 let metaSelPaths = new Set<string>();
@@ -75,17 +78,19 @@ function metaKeyName(t: { name: string; filePath?: string }): string {
  *  toggle is on. */
 export function receiveMetaData(items: { name: string; filePath?: string; text: string }[]): void {
   let changed = false;
+  const updates: { old: string | undefined; text: string }[] = [];
   for (const it of items) {
     const key = metaKeyOf(it.name, it.filePath);
     if (key && it.text !== undefined) {
-      if (metaMap.get(key) !== it.text) { metaMap.set(key, it.text); changed = true; }
+      const old = metaMap.get(key);
+      if (old !== it.text) { metaMap.set(key, it.text); updates.push({ old, text: it.text }); changed = true; }
       if (it.filePath) metaSource.set(key, it.filePath);
     }
   }
   if (!changed) return;
   metaTreeCache.clear();
   metaLeafCache.clear();
-  invalidateFieldContent();
+  updateFieldCounts(updates);
   for (const t of tracks) {
     const m = metaMap.get(metaKeyOf(t.name, t.filePath)) || metaMap.get(metaKeyOf(t.name)) || null;
     t.meta = m;
@@ -125,6 +130,9 @@ function isMetaKeyPaired(key: string): boolean {
   return false;
 }
 
+// Bound DOM growth for sessions containing many orphan .json files.
+const JSON_CARD_CAP = 300;
+
 /** Reconcile standalone JSON cards with the current tracks + metaMap: drop
  *  cards whose key now has matching audio (paired) or is gone from metaMap,
  *  then create cards for still-unpaired keys. Called after cards are created/
@@ -141,6 +149,7 @@ function ensureStandaloneJsonCards(): void {
   const have = new Set(jsonCards.map(c => c.key));
   for (const [key, text] of metaMap) {
     if (have.has(key) || isMetaKeyPaired(key)) continue;
+    if (jsonCards.length >= JSON_CARD_CAP) break;
     const filePath = metaSource.get(key) || undefined;
     const base = filePath ? filePath.replace(/\\/g, '/').split('/').pop() || key : key;
     const card = document.createElement('div');
@@ -268,7 +277,12 @@ function removeJsonCard(key: string): void {
   const c = jsonCards[i];
   if (c.card) c.card.remove();
   jsonCards.splice(i, 1);
+  const text = metaMap.get(key);
   metaMap.delete(key);
+  if (text !== undefined && fieldCounts) {
+    bumpFieldsOf(text, fieldCounts, -1);
+    invalidateFieldContent();
+  }
   const filePath = c.filePath;
   if (filePath) (window as any).__vscodePostMessage?.({ type: 'removeFromLoaded', filePath });
 }
@@ -496,6 +510,7 @@ function updateHead(head: HTMLElement, n: number): void {
 function treePushDeep(v: unknown, depth: number, out: string[]): void { renderTreeInto(v, depth, out, ''); }
 
 function renderTreeInto(v: unknown, depth: number, out: string[], prefix: string): void {
+  if (out.length >= META_TREE_MAX_LINES) return;
   if (v === null || typeof v !== 'object') {
     out.push(lineHtml(depth, '<span class="jv-' + jsonScalarCls(v) + '">' + escMetaText(String(v)) + '</span>'));
     return;
@@ -554,6 +569,8 @@ function metaBodyHtml(meta: string | null | undefined): string {
     catch { return renderJsonMeta(meta); }
     const out: string[] = [];
     renderTreeInto(parsed, 0, out, '');
+    if (out.length >= META_TREE_MAX_LINES)
+      out.push('<div class="json-line" style="color:#888">… truncated (' + META_TREE_MAX_LINES + ' line limit) …</div>');
     return out.join('');
   }
   let parsed: unknown;
@@ -596,25 +613,13 @@ function ensureMetaPop(): HTMLElement {
   return pop;
 }
 function discoverMetaFields(): Map<string, number> {
-  const m = new Map<string, number>();
-  const bump = (raw: string) => {
-    let parsed: unknown;
-    try { parsed = JSON.parse(raw); } catch { return; }
-    const walk = (v: unknown, prefix: string) => {
-      if (!v || typeof v !== 'object') return;
-      if (Array.isArray(v)) { v.forEach((x, i) => walk(x, joinMetaPath(prefix, String(i)))); return; }
-      for (const k of Object.keys(v)) {
-        const p = joinMetaPath(prefix, k);
-        m.set(p, (m.get(p) || 0) + 1);
-        walk((v as Record<string, unknown>)[k], p);
-      }
-    };
-    walk(parsed, '');
-  };
   // Every loaded JSON — paired tracks/groups AND standalone JSON cards all live
   // in metaMap, so a lone .json with no audio still yields its fields.
-  for (const raw of metaMap.values()) bump(raw);
-  return m;
+  if (!fieldCounts) {
+    fieldCounts = new Map<string, number>();
+    for (const raw of metaMap.values()) bumpFieldsOf(raw, fieldCounts, +1);
+  }
+  return fieldCounts;
 }
 
 // ---- field tree (hierarchical, leaf-based selection) ----
@@ -635,6 +640,35 @@ const metaCollapsed = new Set<string>(); // collapsed node paths in the popup
 function invalidateFieldContent(): void { fieldTreeCache = null; fieldStateCache = null; }
 /** Drop only the cached selection state — call when the selection changes. */
 function invalidateFieldState(): void { fieldStateCache = null; }
+
+/** Persistent path -> file-count index. Kept across metadata batches and
+    updated incrementally, so arriving batches do not re-parse every JSON. */
+let fieldCounts: Map<string, number> | null = null;
+
+function bumpFieldsOf(raw: string, m: Map<string, number>, delta: number): void {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return; }
+  const walk = (v: unknown, prefix: string) => {
+    if (!v || typeof v !== 'object') return;
+    if (Array.isArray(v)) { v.forEach((x, i) => walk(x, joinMetaPath(prefix, String(i)))); return; }
+    for (const k of Object.keys(v)) {
+      const p = joinMetaPath(prefix, k);
+      const next = (m.get(p) || 0) + delta;
+      if (next > 0) m.set(p, next); else m.delete(p);
+      walk((v as Record<string, unknown>)[k], p);
+    }
+  };
+  walk(parsed, '');
+}
+
+/** Fold per-key content changes into the persistent field-count index. */
+function updateFieldCounts(updates: { old: string | undefined; text: string }[]): void {
+  if (!fieldCounts) return;   // not built yet — discoverMetaFields builds lazily from metaMap
+  for (const u of updates) {
+    if (u.old !== undefined) bumpFieldsOf(u.old, fieldCounts, -1);
+    bumpFieldsOf(u.text, fieldCounts, +1);
+  }
+}
 
 function buildFieldTree(): FieldNode {
   const fields = discoverMetaFields();
@@ -1594,6 +1628,36 @@ function setTrackView(track: Track, start: number, end: number): void {
   }
 }
 
+// Coalesce high-frequency redraw requests (wheel zoom/pan) into one rAF frame:
+// the last view window wins and each track is re-rasterized at most once.
+const redrawQueue = new Set<Track>();
+let redrawRafId = 0;
+function scheduleTrackRedraw(track: Track): void {
+  redrawQueue.add(track);
+  if (!redrawRafId) redrawRafId = requestAnimationFrame(flushTrackRedraws);
+}
+function flushTrackRedraws(): void {
+  redrawRafId = 0;
+  const list = Array.from(redrawQueue);
+  redrawQueue.clear();
+  const done = new Set<Track>();
+  for (const track of list) {
+    if (!isTrackAlive(track) || done.has(track)) continue;
+    redrawTrack(track);
+    updateRuler(track);
+    done.add(track);
+    if (track.groupId != null) {
+      for (const s of getSiblings(track)) {
+        if (s.id === track.id || done.has(s)) continue;
+        redrawTrack(s);
+        updateRuler(s);
+        done.add(s);
+      }
+    }
+  }
+  if (done.size) updatePlayheads();
+}
+
 function applyZoom(track: Track, anchorRatio: number, factor: number): void {
   const span = track.viewEnd - track.viewStart;
   const anchorTime = track.viewStart + anchorRatio * span;
@@ -1602,16 +1666,7 @@ function applyZoom(track: Track, anchorRatio: number, factor: number): void {
   const newStart = anchorTime - anchorRatio * newSpan;
   setTrackView(track, newStart, newStart + newSpan);
   syncGroupZoom(track);
-  redrawTrack(track);
-  updateRuler(track);
-  // Also redraw siblings
-  if (track.groupId != null) {
-    const sibs = getSiblings(track);
-    for (const s of sibs) {
-      if (s.id !== track.id) { redrawTrack(s); updateRuler(s); }
-    }
-  }
-  updatePlayheads();
+  scheduleTrackRedraw(track);
 }
 
 function applyPan(track: Track, shift: number): void {
@@ -1620,15 +1675,7 @@ function applyPan(track: Track, shift: number): void {
   newStart = Math.max(0, Math.min(track.duration - span, newStart));
   setTrackView(track, newStart, newStart + span);
   syncGroupZoom(track);
-  redrawTrack(track);
-  updateRuler(track);
-  if (track.groupId != null) {
-    const sibs = getSiblings(track);
-    for (const s of sibs) {
-      if (s.id !== track.id) { redrawTrack(s); updateRuler(s); }
-    }
-  }
-  updatePlayheads();
+  scheduleTrackRedraw(track);
 }
 
 function syncGroupZoom(track: Track): void {
@@ -1802,6 +1849,9 @@ export function updateLaneHighlights(): void {
 }
 
 export function updatePlayheads(): void {
+  // Read phase: gather positions and widths first (single layout flush),
+  // then write all styles — avoids interleaved read/write thrash.
+  const jobs: { ph: HTMLElement; wf: HTMLElement | null; hide: boolean; px?: number; wfPx?: number }[] = [];
   for (const t of tracks) {
     if (!t.loaded) continue;
     const pos = getPos(t);
@@ -1810,37 +1860,32 @@ export function updatePlayheads(): void {
     if (isMultiTrack(t)) {
       for (const ch of t.chViews) {
         if (!ch.canvas || !ch.ph) continue;
-        if (!visible) {
-          ch.ph.style.display = 'none';
-          if (ch.waveformPh) ch.waveformPh.style.display = 'none';
-        } else {
-          ch.ph.style.display = '';
-          const frac = (pos - t.viewStart) / span;
-          const px = frac * ch.wrapper!.clientWidth;
-          ch.ph.style.transform = 'translateX(' + px + 'px)';
-          if (ch.waveformPh) {
-            ch.waveformPh.style.display = '';
-            const wfPx = ch.waveformWrapper ? frac * ch.waveformWrapper.clientWidth : px;
-            ch.waveformPh.style.transform = 'translateX(' + wfPx + 'px)';
-          }
-        }
+        if (!visible) { jobs.push({ ph: ch.ph, wf: ch.waveformPh ?? null, hide: true }); continue; }
+        const frac = (pos - t.viewStart) / span;
+        const px = frac * ch.wrapper!.clientWidth;
+        const wfPx = ch.waveformPh ? (ch.waveformWrapper ? frac * ch.waveformWrapper.clientWidth : px) : 0;
+        jobs.push({ ph: ch.ph, wf: ch.waveformPh ?? null, hide: false, px, wfPx });
       }
       continue;
     }
     if (!t.canvas || !t.ph) continue;
-    if (!visible) {
-      t.ph.style.display = 'none';
-      if (t.waveformPh) t.waveformPh.style.display = 'none';
-    } else {
-      t.ph.style.display = '';
-      const frac = (pos - t.viewStart) / span;
-      const px = frac * t.wrapper!.clientWidth;
-      t.ph.style.transform = 'translateX(' + px + 'px)';
-      if (t.waveformPh) {
-        t.waveformPh.style.display = '';
-        const wfPx = t.waveformWrapper ? frac * (t.waveformWrapper as HTMLElement).clientWidth : px;
-        t.waveformPh.style.transform = 'translateX(' + wfPx + 'px)';
-      }
+    if (!visible) { jobs.push({ ph: t.ph, wf: t.waveformPh ?? null, hide: true }); continue; }
+    const frac = (pos - t.viewStart) / span;
+    const px = frac * t.wrapper!.clientWidth;
+    const wfPx = t.waveformPh ? (t.waveformWrapper ? frac * (t.waveformWrapper as HTMLElement).clientWidth : px) : 0;
+    jobs.push({ ph: t.ph, wf: t.waveformPh ?? null, hide: false, px, wfPx });
+  }
+  for (const j of jobs) {
+    if (j.hide) {
+      j.ph.style.display = 'none';
+      if (j.wf) j.wf.style.display = 'none';
+      continue;
+    }
+    j.ph.style.display = '';
+    j.ph.style.transform = 'translateX(' + j.px + 'px)';
+    if (j.wf) {
+      j.wf.style.display = '';
+      j.wf.style.transform = 'translateX(' + j.wfPx + 'px)';
     }
   }
 }
@@ -2596,6 +2641,16 @@ function renderedElementCount(): number {
   return renderedCards.reduce((count, record) => count + record.elements.length, 0);
 }
 
+/** Drop the decoded PCM a window record's descriptors hold onto. Only items
+    that can re-decode from their lazy source release their buffer; on restore
+    the cards re-fetch via lazyUri, so long scrolling sessions no longer pin
+    every buffer ever rendered. */
+function releaseRecordBuffers(rec: WindowRec): void {
+  for (const it of rec.group.items) {
+    if (it.buffer && it.lazyUri) it.buffer = null;
+  }
+}
+
 function recycleTop(): void {
   while (renderedElementCount() > MAX_RENDERED) {
     const index = renderedCards.findIndex(record => !isPinnedRec(record));
@@ -2604,6 +2659,7 @@ function recycleTop(): void {
     r.restoreBefore = renderedCards[index];
     for (const el of r.elements.slice()) removeCardByEl(el);
     r.elements = [];
+    releaseRecordBuffers(r);
     releasedTop.push(r);
   }
   fixActiveTrack();
@@ -2684,6 +2740,7 @@ function restoreTop(count: number): void {
     const [r] = renderedCards.splice(index, 1);
     for (const el of r.elements.slice()) if (el.isConnected) removeCardByEl(el);
     r.elements = [];
+    releaseRecordBuffers(r);
     pendingGroups.unshift(r.group);
   }
   fixActiveTrack();
@@ -2732,6 +2789,7 @@ export function clearAll(): void {
   metaSource.clear();
   metaTreeCache.clear();
   metaLeafCache.clear();
+  fieldCounts = null;
   pendingMeta.clear();
   metaLoading.clear();
   allAudioMetaKeys.clear();

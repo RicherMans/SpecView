@@ -368,6 +368,7 @@ export function drawWaveform(track: Track, chIndex = -1): void {
   // Draw waveform envelope (min/max per pixel column)
   ctx.strokeStyle = '#4a9eff';
   ctx.lineWidth = 1;
+  ctx.beginPath();
 
   for (let x = 0; x < W; x++) {
     const sStart = Math.floor(startSample + x * samplesPerPixel);
@@ -383,11 +384,10 @@ export function drawWaveform(track: Track, chIndex = -1): void {
     // Map amplitude [-1, 1] to pixel Y
     const yMin = mid - max * mid;
     const yMax = mid - min * mid;
-    ctx.beginPath();
     ctx.moveTo(x, yMin);
     ctx.lineTo(x, yMax);
-    ctx.stroke();
   }
+  ctx.stroke();
 }
 
 /**

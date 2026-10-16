@@ -17,7 +17,7 @@ export function getWebviewHtml(
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://registry.npmmirror.com; style-src 'unsafe-inline'; font-src data:; img-src data: blob: ${cspSource}; connect-src ${cspSource} https://cdn.jsdelivr.net https://registry.npmmirror.com data: blob:; worker-src blob:; child-src blob:;">
 <title>SpecView</title>
-<script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
+<script async nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
 </head>
 <body>
 <div class="toolbar">

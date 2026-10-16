@@ -115,6 +115,7 @@ export async function extractGzipArchive(
   tempDirectory: string,
   maxCachedBytes = ARCHIVE_LIMITS.maxCachedBytes,
   isCurrent: () => boolean = () => true,
+  onEntry?: (kind: 'audio' | 'json', entry: TarEntry, index: number) => void | Promise<void>,
 ): Promise<ArchiveContents> {
   await mkdir(tempDirectory, { recursive: true });
   const audio: TarEntry[] = [];
@@ -154,6 +155,7 @@ export async function extractGzipArchive(
         const outputPath = path.join(tempDirectory, `${entries.length}.${extension}`);
         await pipeline(stream as NodeJS.ReadableStream, createWriteStream(outputPath, { flags: 'wx' }));
         entries.push({ name: header.name, offset: 0, size: header.size });
+        if (onEntry) await onEntry(extension as 'audio' | 'json', entries[entries.length - 1], entries.length - 1);
       } else {
         stream.resume();
       }

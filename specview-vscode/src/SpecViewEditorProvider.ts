@@ -303,46 +303,83 @@ export class SpecViewEditorProvider implements vscode.CustomReadonlyEditorProvid
       try {
         const compressed = /\.(tar\.gz|tgz)$/i.test(archiveUri.fsPath);
         if (compressed) {
+          // Progressive: register each entry and post its descriptor as soon as
+          // it is written, so cards appear while the archive is still extracting.
           tempDirectory = await session.createArchiveDirectory(generation);
           if (!session.isCurrent(generation)) return;
-        }
-        const contents = compressed
-          ? await extractGzipArchive(archiveUri.fsPath, tempDirectory!, session.remainingCacheBytes, () => session.isCurrent(generation))
-          : await indexTarFile(archiveUri.fsPath, () => session.isCurrent(generation));
-        if (!session.isCurrent(generation)) return;
-        if (compressed) {
+          const lazy: ReturnType<typeof lazySourceDescriptor>[] = [];
+          let posted = 0;
+          const flushLazy = async (): Promise<void> => {
+            while (lazy.length - posted >= MESSAGE_BATCH_SIZE) {
+              if (!session.isCurrent(generation)) throw new Error('Session was replaced');
+              await panel.webview.postMessage({ type: 'fileURIs', files: lazy.slice(posted, posted + MESSAGE_BATCH_SIZE) });
+              posted += MESSAGE_BATCH_SIZE;
+            }
+          };
+          const contents = await extractGzipArchive(
+            archiveUri.fsPath,
+            tempDirectory,
+            session.remainingCacheBytes,
+            () => session.isCurrent(generation),
+            async (kind, entry, index) => {
+              const name = path.posix.basename(entry.name);
+              const logicalPath = `${archiveUri.fsPath}\n${entry.name}`;
+              const source: Source = {
+                kind: 'temp', name,
+                filePath: path.join(tempDirectory!, `${index}.${kind}`),
+                size: entry.size,
+              };
+              const sourceId = session.register(source);
+              sourceIds.push(sourceId);
+              const descriptor = lazySourceDescriptor(name, logicalPath, sourceId, generation);
+              if (kind === 'audio') {
+                lazy.push(descriptor);
+                await flushLazy();
+              } else {
+                metaSources.push(descriptor);
+              }
+            }
+          );
+          if (!session.isCurrent(generation)) return;
           session.addCachedBytes(contents.cachedBytes);
           cachedBytes = contents.cachedBytes;
-        }
-        const lazy: ReturnType<typeof lazySourceDescriptor>[] = [];
-        for (let index = 0; index < contents.audio.length; index++) {
-          const entry = contents.audio[index];
-          const name = path.posix.basename(entry.name);
-          const logicalPath = `${archiveUri.fsPath}\n${entry.name}`;
-          const source: Source = compressed
-            ? { kind: 'temp', name, filePath: path.join(tempDirectory!, `${index}.audio`), size: entry.size }
-            : { kind: 'tar', name, filePath: archiveUri.fsPath, entry };
-          const sourceId = session.register(source);
-          sourceIds.push(sourceId);
-          lazy.push(lazySourceDescriptor(name, logicalPath, sourceId, generation));
-        }
-        if (contents.audio.length === 0 && contents.json.length === 0) {
-          console.warn('[SpecView] Archive has no supported audio or JSON:', archiveUri.fsPath);
-        }
-        for (let index = 0; index < lazy.length; index += MESSAGE_BATCH_SIZE) {
-          await panel.webview.postMessage({ type: 'fileURIs', files: lazy.slice(index, index + MESSAGE_BATCH_SIZE) });
-        }
-        // JSON inside archives is delivered lazily as descriptors.
-        for (let index = 0; index < contents.json.length; index++) {
-          const entry = contents.json[index];
-          const name = path.posix.basename(entry.name);
-          const logicalPath = `${archiveUri.fsPath}\n${entry.name}`;
-          const source: Source = compressed
-            ? { kind: 'temp', name, filePath: path.join(tempDirectory!, `${index}.json`), size: entry.size }
-            : { kind: 'tar', name, filePath: archiveUri.fsPath, entry };
-          const sourceId = session.register(source);
-          sourceIds.push(sourceId);
-          metaSources.push(lazySourceDescriptor(name, logicalPath, sourceId, generation));
+          await flushLazy();
+          const tail = lazy.slice(posted);
+          if (tail.length && session.isCurrent(generation)) {
+            await panel.webview.postMessage({ type: 'fileURIs', files: tail });
+          }
+          if (contents.audio.length === 0 && contents.json.length === 0) {
+            console.warn('[SpecView] Archive has no supported audio or JSON:', archiveUri.fsPath);
+          }
+        } else {
+          const contents = await indexTarFile(archiveUri.fsPath, () => session.isCurrent(generation));
+          if (!session.isCurrent(generation)) return;
+          const lazy: ReturnType<typeof lazySourceDescriptor>[] = [];
+          for (let index = 0; index < contents.audio.length; index++) {
+            const entry = contents.audio[index];
+            const name = path.posix.basename(entry.name);
+            const logicalPath = `${archiveUri.fsPath}\n${entry.name}`;
+            const source: Source = { kind: 'tar', name, filePath: archiveUri.fsPath, entry };
+            const sourceId = session.register(source);
+            sourceIds.push(sourceId);
+            lazy.push(lazySourceDescriptor(name, logicalPath, sourceId, generation));
+          }
+          if (contents.audio.length === 0 && contents.json.length === 0) {
+            console.warn('[SpecView] Archive has no supported audio or JSON:', archiveUri.fsPath);
+          }
+          for (let index = 0; index < lazy.length; index += MESSAGE_BATCH_SIZE) {
+            await panel.webview.postMessage({ type: 'fileURIs', files: lazy.slice(index, index + MESSAGE_BATCH_SIZE) });
+          }
+          // JSON inside archives is delivered lazily as descriptors.
+          for (let index = 0; index < contents.json.length; index++) {
+            const entry = contents.json[index];
+            const name = path.posix.basename(entry.name);
+            const logicalPath = `${archiveUri.fsPath}\n${entry.name}`;
+            const source: Source = { kind: 'tar', name, filePath: archiveUri.fsPath, entry };
+            const sourceId = session.register(source);
+            sourceIds.push(sourceId);
+            metaSources.push(lazySourceDescriptor(name, logicalPath, sourceId, generation));
+          }
         }
         session.loadedFiles.add(archiveUri.fsPath);
       } catch (error) {
