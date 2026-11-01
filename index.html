@@ -433,7 +433,7 @@ body.meta-sel .meta-clear { display: inline-block; }
 .spec-wrapper {
   position: relative; flex: 1; overflow: hidden; cursor: crosshair;
 }
-.spec-wrapper canvas { display: block; width: 100%; }
+.spec-wrapper canvas { display: block; width: 100%; height: 100%; }
 .playhead {
   position: absolute; top: 0; left: 0; width: 2px; height: 100%;
   background: var(--playhead); pointer-events: none; z-index: 10;
@@ -640,6 +640,8 @@ const SCROLL_BATCH   = 30;  // cards revealed per scroll (infinite scroll)
 const MAX_RENDERED   = 500; // hard cap on rendered cards (older ones recycled)
 const ARCH_PREWARM   = 64;  // archive entries cached during the index pass (LRU warm)
 const ARCH_LRU_CAP   = 64;  // max archive entries retained in the on-demand LRU cache
+const ARCH_CACHE_MAX_BYTES = 128 << 20;  // cap archive bytes, not just entry count
+const ARCH_PREWARM_MAX_BYTES = 128 << 20; // cap bytes held during the gzip index pass
 
 /* Ocenaudio-style hot-metal colormap:
    black → deep navy → blue → purple → magenta → red → orange → yellow → white */
@@ -1518,10 +1520,10 @@ function sniffAudioMagic(b) {
    unless asked for. opts:
      onAudio(rec)  -> { seq, name, path, size, bytes:Uint8Array|null }
                       fired once an audio entry's payload has fully passed;
-                      bytes are only present when captureAudio(seq) returned
-                      true for it.
+                      bytes are only present when captureAudio(seq, size)
+                      returned true for it.
      onJson(j)     -> { name, path, text } for small .json files (emitJson)
-     captureAudio(seq) -> predicate deciding whether to hold that payload
+     captureAudio(seq, size) -> predicate deciding whether to hold that payload
      emitJson      -> default true
    finish() reports what was salvaged. Never throws on malformed data. */
 function createTarReader(opts) {
@@ -1648,7 +1650,7 @@ function createTarReader(opts) {
     if (mime && rec) {
       rec.seq = seqCount++;
       pendingAudio = rec;
-      if (!!captureAudio && captureAudio(rec.seq)) {
+      if (!!captureAudio && captureAudio(rec.seq, rec.size)) {
         mode = 'audioCapture';          /* keep head bytes as payload prefix */
       } else {
         mode = 'skip';                  /* end handler emits bytes:null */
@@ -1694,7 +1696,7 @@ function createTarReader(opts) {
       const seq = seqCount++;
       pendingAudio = { seq, name, path: name, size };
       curName = name;
-      const want = !!captureAudio && captureAudio(seq);
+      const want = !!captureAudio && captureAudio(seq, size);
       startPayload(want ? 'audioCapture' : 'skip', size, null);
     } else if (isJson) {
       curName = name;
@@ -1816,6 +1818,185 @@ function createTarReader(opts) {
   return { feed, finish };
 }
 
+/* Header-only indexer for uncompressed tar files. Tar payloads are never read
+   while enumerating: a header stores the payload size, so the next header is at
+   offset + 512 + padded(size). This turns opening a multi-GB shard into a walk
+   over its headers. The payload is read later with Blob.slice() on demand. */
+async function indexPlainTar(file, opts) {
+  opts = opts || {};
+  const onAudio = opts.onAudio || function(){};
+  const onJson = opts.onJson || function(){};
+  const shouldStop = opts.shouldStop || function(){ return false; };
+  const REGULAR = new Set(['0', '\0', '']);
+  const dec = new TextDecoder('utf-8');
+
+  let seqCount = 0, audioEmitted = 0, entries = 0;
+  let truncated = false, cleanEnd = false, stopped = false;
+  let pendingLongName = null, pendingPaxPath = null;
+
+  async function readAt(offset, length) {
+    const end = Math.min(file.size, offset + length);
+    if (end <= offset) return new Uint8Array(0);
+    return new Uint8Array(await file.slice(offset, end).arrayBuffer());
+  }
+  function trim(bytes) {
+    let end = bytes.length;
+    while (end > 0 && (bytes[end - 1] === 0 || bytes[end - 1] === 0x20)) end--;
+    return dec.decode(bytes.subarray(0, end));
+  }
+  function isZeroBlock(h) {
+    for (let i = 0; i < 512; i++) if (h[i]) return false;
+    return true;
+  }
+  function checksumValid(h) {
+    let stored = 0, any = false;
+    for (let i = 148; i < 156; i++) {
+      const c = h[i];
+      if (c === 0x20 || c === 0) continue;
+      if (c < 0x30 || c > 0x37) { stored = -1; break; }
+      stored = stored * 8 + (c - 0x30);
+      any = true;
+    }
+    if (!any) stored = 0;
+    if (stored < 0) return false;
+    let sum = 0;
+    for (let i = 0; i < 512; i++) {
+      if (i >= 148 && i < 156) { sum += 0x20; continue; }
+      sum += h[i];
+    }
+    return stored === sum;
+  }
+  function readSize(h) {
+    if (h[124] & 0x80) {
+      let v = h[124] & 0x7f;
+      for (let i = 125; i < 136; i++) v = v * 256 + h[i];
+      return v;
+    }
+    let v = 0, any = false;
+    for (let i = 124; i < 136; i++) {
+      const c = h[i];
+      if (c === 0x20 || c === 0) continue;
+      if (c < 0x30 || c > 0x37) return -1;
+      v = v * 8 + (c - 0x30);
+      any = true;
+    }
+    return any ? v : 0;
+  }
+  function parsePax(text) {
+    const out = {};
+    let p = 0;
+    while (p < text.length) {
+      const sp = text.indexOf(' ', p);
+      if (sp < 0) break;
+      const len = parseInt(text.slice(p, sp), 10);
+      if (!(len > 0) || sp + 1 + (len - (sp - p + 1)) > text.length) break;
+      const body = text.slice(sp + 1, sp + 1 + (len - (sp - p + 1)));
+      const eq = body.indexOf('=');
+      if (eq > 0) out[body.slice(0, eq)] = body.slice(eq + 1).replace(/[\n\r\0]+$/, '');
+      p = sp + 1 + (len - (sp - p + 1));
+    }
+    return out;
+  }
+
+  /* Recover from a bad header by finding the next checksum-valid 512-byte
+     block. This only runs for corrupt/truncated archives. */
+  async function findNextHeader(start) {
+    const MAX_SCAN = 8192 * 512;
+    let pos = start;
+    while (pos < file.size && pos - start < MAX_SCAN) {
+      const chunk = await readAt(pos, Math.min(65536, file.size - pos));
+      if (!chunk.length) return -1;
+      for (let i = 0; i + 512 <= chunk.length; i += 512) {
+        const h = chunk.subarray(i, i + 512);
+        if (isZeroBlock(h) || checksumValid(h)) return pos + i;
+      }
+      if (chunk.length < 65536) return -1;
+      pos += chunk.length;
+    }
+    return -1;
+  }
+
+  let off = 0;
+  while (off + 512 <= file.size) {
+    if (shouldStop()) { stopped = true; break; }
+    const h = await readAt(off, 512);
+    if (h.length < 512) { truncated = true; break; }
+    if (isZeroBlock(h)) { cleanEnd = true; break; }
+    if (!checksumValid(h)) {
+      truncated = true;
+      const next = await findNextHeader(off + 512);
+      if (next < 0) break;
+      off = next;
+      continue;
+    }
+
+    const type = String.fromCharCode(h[156]);
+    const size = readSize(h);
+    const dataOff = off + 512;
+    const padded = size > 0 ? Math.ceil(size / 512) * 512 : 0;
+    const nextOff = dataOff + padded;
+    if (size < 0 || !Number.isSafeInteger(nextOff) || nextOff < dataOff) {
+      truncated = true;
+      const next = await findNextHeader(dataOff);
+      if (next < 0) break;
+      off = next;
+      continue;
+    }
+    const complete = dataOff + size <= file.size;
+
+    if (type === 'L' || type === 'x' || type === 'g') {
+      if (!complete) { truncated = true; break; }
+      const text = (size > 0 ? dec.decode(await readAt(dataOff, size)) : '').replace(/\0+$/g, '');
+      if (type === 'L') pendingLongName = text;
+      else {
+        const pax = parsePax(text);
+        if (type === 'x' && pax.path) pendingPaxPath = pax.path;
+      }
+      off = nextOff;
+      continue;
+    }
+
+    let name = trim(h.subarray(0, 100));
+    if (pendingLongName !== null) { name = pendingLongName || name; pendingLongName = null; }
+    if (pendingPaxPath !== null) { name = pendingPaxPath || name; pendingPaxPath = null; }
+    const magic = dec.decode(h.subarray(257, 263));
+    if (magic.indexOf('ustar') === 0) {
+      const pfx = trim(h.subarray(345, 500));
+      if (pfx) name = pfx + '/' + name;
+    }
+
+    const base = name.split('/').pop() || '';
+    const regular = REGULAR.has(type) && size > 0;
+    const isAudio = regular && AUDIO_RE.test(base);
+    const isJson = regular && size <= META_MAX && META_RE.test(base);
+    if (isAudio || isJson) {
+      if (!complete) { truncated = true; break; }
+      if (isAudio) {
+        const seq = seqCount++;
+        audioEmitted++;
+        onAudio({ seq, name, path: name, size, offset: dataOff });
+      } else {
+        onJson({ name, path: name, text: dec.decode(await readAt(dataOff, size)).replace(/\0+$/g, '') });
+      }
+    } else if (regular) {
+      if (!complete) { truncated = true; break; }
+      /* Unknown extension: sniff the first bytes, exactly like the streaming
+         reader does for webdataset *.audio members. */
+      const head = await readAt(dataOff, Math.min(SNIFF_LEN, size));
+      if (sniffAudioMagic(head)) {
+        const seq = seqCount++;
+        audioEmitted++;
+        onAudio({ seq, name, path: name, size, offset: dataOff });
+      }
+    }
+    entries++;
+    off = nextOff;
+  }
+
+  if (off < file.size && !cleanEnd && !stopped) truncated = true;
+  return { entries, audioEmitted, truncated, cleanEnd, stopped };
+}
+
 const GZ_RE = /\.(tar\.gz|tgz)$/i;
 
 /* Per-archive on-demand reader. Nothing is held in memory — a request for
@@ -1827,13 +2008,27 @@ function makeArchiveFetcher(file, isGz) {
   let state = null;                    /* { tr, reader } */
   let curEmitted = 0;
   let busy = false;
+  let cacheBytes = 0;
 
-  function cachePut(seq, bytes) {
-    if (cache.has(seq)) cache.delete(seq);
+  function cacheDelete(seq) {
+    const bytes = cache.get(seq);
+    if (bytes) cacheBytes -= bytes.length;
+    cache.delete(seq);
+  }
+  function cacheTouch(seq) {
+    const bytes = cache.get(seq);
+    if (!bytes) return null;
+    cache.delete(seq);
     cache.set(seq, bytes);
-    while (cache.size > ARCH_LRU_CAP) {
+    return bytes;
+  }
+  function cachePut(seq, bytes) {
+    cacheDelete(seq);
+    cache.set(seq, bytes);
+    cacheBytes += bytes.length;
+    while (cache.size > ARCH_LRU_CAP || (cacheBytes > ARCH_CACHE_MAX_BYTES && cache.size > 1)) {
       const oldest = cache.keys().next().value;
-      cache.delete(oldest);
+      cacheDelete(oldest);
     }
   }
 
@@ -1872,12 +2067,17 @@ function makeArchiveFetcher(file, isGz) {
         const { tr, reader } = state;
         let finished = false, err = null;
         while (pending.size && !finished && !err) {
+          /* A request for an earlier entry can arrive while this forward pass
+             is running. Break out so the outer loop can restart the cursor
+             instead of scanning to EOF and failing the request. */
+          if (state && Math.min(...pending.keys()) < curEmitted) break;
           let r;
           try { r = await reader.read(); }
           catch (e) { err = e; break; }
           if (r.done) { finished = true; break; }
           tr.feed(r.value);
         }
+        if (!pending.size) break;
         if (finished || err) {
           for (const k of [...pending.keys()]) {
             const res = pending.get(k);
@@ -1895,11 +2095,11 @@ function makeArchiveFetcher(file, isGz) {
 
   return {
     fetch(seq) {
-      const hit = cache.get(seq);
+      const hit = cacheTouch(seq);
       if (hit) return Promise.resolve(hit);
       return new Promise(res => { pending.set(seq, res); pump(); });
     },
-    peek(seq) { return cache.get(seq) || null; },
+    peek(seq) { return cacheTouch(seq); },
     prewarm(seq, bytes) { cachePut(seq, bytes); }
   };
 }
@@ -1926,6 +2126,14 @@ function lazyAudioHandle(fetcher, seq, name, readyPromise) {
         return bytes.buffer;
       });
     }
+  };
+}
+
+/* File-like handle backed by one byte range in an uncompressed tar. */
+function randomAccessAudioHandle(file, offset, size, name) {
+  return {
+    name: name || '',
+    arrayBuffer() { return file.slice(offset, offset + size).arrayBuffer(); }
   };
 }
 
@@ -2044,13 +2252,14 @@ async function handleDroppedItems(fileList) {
   }
 
   /* --- streaming, non-blocking archive loading --------------------------
-     The index pass builds a lightweight list of entries (name/path/seq only)
-     — no audio payload is retained. Cards are then materialized on demand:
-     the first INITIAL_RENDER cards appear as soon as they are indexed, the
-     rest wait for the scroll sentinel, and each card decodes on demand. */
+     Uncompressed tar is indexed by reading headers only; audio payloads are
+     fetched later with Blob.slice(). Gzip cannot be randomly indexed, so it is
+     read once through DecompressionStream while cards are published as soon as
+     their headers pass. In both cases cards are materialized on demand. */
   const archiveMeta = new Map();          /* key -> .json text (kept, small) */
   const notices = [];
   const STREAM_BATCH = 40;
+  const ingestEpoch = clearEpoch;
   let queue = [];                         /* lightweight indexed items awaiting flush */
 
   const flushIndex = () => {
@@ -2081,76 +2290,110 @@ async function handleDroppedItems(fileList) {
 
   let shown = 0;
   let lastProg = 0;
+  const addJsonMeta = j => {
+    const k = metaKeyOf(j.name, j.path);
+    archiveMeta.set(k, j.text);
+    metaMap.set(k, j.text);
+    metaSource.set(k, j.path);
+  };
+  const addAudioItem = (rec, handle) => {
+    queue.push({
+      name: rec.name, buffer: null, nativeSR: null, file: handle, filePath: rec.path,
+      meta: archiveMeta.get(metaKeyOf(rec.name, rec.path)) || null
+    });
+    shown++;
+    /* Materialize the first entries immediately; grouping still merges a
+       matching suffix into the existing card when the next entry arrives.
+       After the initial window, use larger batches to keep DOM work bounded. */
+    const flushThreshold = renderedCards.length < INITIAL_RENDER ? 1 : STREAM_BATCH;
+    if (queue.length >= flushThreshold) {
+      flushIndex();
+      const now = performance.now();
+      if (now - lastProg > 120) {
+        lastProg = now;
+        streamProgSet('Indexed ' + shown + ' tracks…');
+      }
+    }
+  };
+
   for (const tf of tarFiles) {
+    if (ingestEpoch !== clearEpoch) break;
     const isGz = GZ_RE.test(tf.name);
     if (isGz && typeof DecompressionStream === 'undefined') {
       notices.push('DecompressionStream not supported in this browser — skipped ' + tf.name);
       continue;
     }
-    const fetcher = makeArchiveFetcher(tf, isGz);
+    const archiveStart = shown;
+
+    if (!isGz) {
+      const st = await indexPlainTar(tf, {
+        shouldStop: () => ingestEpoch !== clearEpoch,
+        onAudio: rec => addAudioItem(rec, randomAccessAudioHandle(tf, rec.offset, rec.size, rec.name)),
+        onJson: addJsonMeta,
+      });
+      if (ingestEpoch !== clearEpoch) return;
+      flushIndex();
+      const archiveCount = shown - archiveStart;
+      if (st.truncated) {
+        notices.push(archiveCount
+          ? 'Archive ' + tf.name + ' — loaded ' + archiveCount + ' tracks, then truncated'
+          : 'No audio recovered from ' + tf.name + ' (truncated/corrupt)');
+      }
+      streamProgSet('Loaded ' + archiveCount + ' tracks from ' + tf.name);
+      continue;
+    }
+
+    const fetcher = makeArchiveFetcher(tf, true);
     let resolveReady;
     const readyPromise = new Promise(res => { resolveReady = res; });
+    let prewarmBytes = 0;
 
     const tr = createTarReader({
       onAudio: rec => {
-        if (rec.bytes) fetcher.prewarm(rec.seq, rec.bytes);  /* warm the first entries */
-        const handle = lazyAudioHandle(fetcher, rec.seq, rec.name, readyPromise);
-        queue.push({
-          name: rec.name, buffer: null, nativeSR: null, file: handle, filePath: rec.path,
-          meta: archiveMeta.get(metaKeyOf(rec.name, rec.path)) || null
-        });
-        shown++;
+        if (rec.bytes) fetcher.prewarm(rec.seq, rec.bytes);
+        addAudioItem(rec, lazyAudioHandle(fetcher, rec.seq, rec.name, readyPromise));
       },
-      onJson: j => {
-        const k = metaKeyOf(j.name, j.path);
-        archiveMeta.set(k, j.text);
-        metaMap.set(k, j.text);
-        metaSource.set(k, j.path);
-      },
-      captureAudio: seq => seq < ARCH_PREWARM
+      onJson: addJsonMeta,
+      captureAudio: (seq, size) => {
+        if (seq >= ARCH_PREWARM) return false;
+        if (prewarmBytes + size > ARCH_PREWARM_MAX_BYTES) return false;
+        prewarmBytes += size;
+        return true;
+      }
     });
 
-    let src = tf.stream();
-    if (isGz) src = src.pipeThrough(new DecompressionStream('gzip'));
+    let src = tf.stream().pipeThrough(new DecompressionStream('gzip'));
     const reader = src.getReader();
     let streamError = null;
     try {
       for (;;) {
+        if (ingestEpoch !== clearEpoch) break;
         let r;
         try { r = await reader.read(); }
         catch (e) { streamError = e; break; }
         if (r.done) break;
         tr.feed(r.value);
-        /* Flush eagerly while the first cards haven't rendered yet (so the
-           initial spectrograms appear after just a few entries), then settle
-           into larger batches for grouping quality. */
-        const flushThreshold = renderedCards.length < INITIAL_RENDER ? INITIAL_RENDER : STREAM_BATCH;
-        if (queue.length >= flushThreshold) {
-          flushIndex();
-          const now = performance.now();
-          if (now - lastProg > 120) {
-            lastProg = now;
-            streamProgSet('Indexed ' + shown + ' tracks…');
-          }
-        }
       }
     } finally {
       try { reader.releaseLock(); } catch (e) {}
     }
+    if (ingestEpoch !== clearEpoch) return;
     flushIndex();
     resolveReady();            /* indexing pass done — allow on-demand decodes */
 
     const st = tr.finish();
     const truncated = st.truncated || !!streamError;
+    const archiveCount = shown - archiveStart;
     if (truncated) {
-      notices.push(shown
-        ? 'Archive ' + tf.name + ' — loaded ' + shown + ' tracks, then truncated'
+      notices.push(archiveCount
+        ? 'Archive ' + tf.name + ' — loaded ' + archiveCount + ' tracks, then truncated'
         : 'No audio recovered from ' + tf.name + ' (truncated/corrupt)');
     }
-    streamProgSet('Loaded ' + shown + ' tracks from ' + tf.name);
+    streamProgSet('Loaded ' + archiveCount + ' tracks from ' + tf.name);
     await new Promise(r => setTimeout(r, 30));
   }
 
+  if (ingestEpoch !== clearEpoch) return;
   attachMetas();
   if (regularFiles.length) await handleFiles(regularFiles, jsonFiles);
   streamProgHide();
@@ -2692,9 +2935,10 @@ function drawSpec(track, chIndex) {
   const isLE = new Uint8Array(new Uint32Array([0x0A0B0C0D]).buffer)[0] === 0x0D;
   for (let x = 0; x < W; x++) {
     const col = Math.min(startFrame + Math.round(x * visibleFrames / W), endFrame);
-    const base = col * H;
+    const base = col * specH;
     for (let y = 0; y < H; y++) {
-      const db = specData[base + y];
+      const srcY = H === specH ? y : (H > 1 ? Math.round(y * (specH - 1) / (H - 1)) : 0);
+      const db = specData[base + srcY];
       let norm = (db - floor) * invRange;
       if (norm < 0) norm = 0; else if (norm > 1) norm = 1;
       const li = (norm * 255 + 0.5) | 0; const ci = li * 3; const o = y * W + x;
@@ -4083,6 +4327,7 @@ function setMetaVisible(visible) {
       refreshAllMetaBodies();
     } else {
       hideMetaAll();
+      sizeAndRedrawLoaded();
     }
   });
 }
@@ -5234,6 +5479,18 @@ function renderAnalysisStrip(track) {
  * ======================================================================== */
 dropZone.addEventListener('click',()=>fileInput.click());
 fileInput.addEventListener('change',e=>{handleDroppedItems(e.target.files);e.target.value='';});
+
+/* Re-polish near-viewport canvases after a window width change. The CSS keeps
+   them from clipping immediately; this restores their native backing width. */
+let viewportResizeRaf = 0;
+window.addEventListener('resize', () => {
+  if (viewportResizeRaf) return;
+  viewportResizeRaf = requestAnimationFrame(() => {
+    viewportResizeRaf = 0;
+    sizeAndRedrawLoaded();
+    updatePlayheads();
+  });
+});
 
 /* Full-page drag-and-drop */
 const dropOverlay = document.getElementById('drop-overlay');
