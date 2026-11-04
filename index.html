@@ -2295,6 +2295,7 @@ async function handleDroppedItems(fileList) {
     archiveMeta.set(k, j.text);
     metaMap.set(k, j.text);
     metaSource.set(k, j.path);
+    scheduleVisibleMetaRefresh();
   };
   const addAudioItem = (rec, handle) => {
     queue.push({
@@ -3181,7 +3182,9 @@ function mkTrack(name, buffer, nativeSR, file, filePath, meta) {
   const ny        = displaySR / 2;
   return {
     id, name, buffer, file: file || null, filePath: filePath || null, loaded,
-    meta: meta || null,
+    /* JSON may arrive after an archive card descriptor is created, so fall
+       back to the global map when this track is finally materialized. */
+    meta: meta || metaMap.get(metaKeyOf(name, filePath)) || null,
     duration:dur, nyquist:ny, sr:displaySR, nativeSR:displaySR, renderSR,
     canvas:null, wrapper:null, ph:null, laneLabel:null, analysisStrip:null, analyzeBtn:null, rulerEl:null,
     metaPanel:null,
@@ -3760,6 +3763,27 @@ const META_INLINE_CAP = 220;    /* max chars of an inline value preview */
 const metaMap = new Map();
 const metaSource = new Map();
 
+/* Metadata may be read after its audio card has already been created (tar
+   stores the two entries consecutively). Resolve lazily from metaMap, then
+   cache it on the track. */
+function resolvedTrackMeta(t) {
+  if (!t.meta) {
+    const m = metaMap.get(metaKeyOf(t.name, t.filePath || null));
+    if (m) t.meta = m;
+  }
+  return t.meta || null;
+}
+
+/* Coalesce metadata arrivals into one viewport-only panel refresh per frame. */
+let metaRefreshRaf = 0;
+function scheduleVisibleMetaRefresh() {
+  if (metaRefreshRaf) return;
+  metaRefreshRaf = requestAnimationFrame(() => {
+    metaRefreshRaf = 0;
+    if (metaVisible) refreshMetaWindow();
+  });
+}
+
 /* ---- JSON Pointer (RFC 6901) path helpers ---- */
 function encMetaSeg(seg) { return String(seg).replace(/~/g, '~0').replace(/\//g, '~1'); }
 function decMetaSeg(seg) { return String(seg).replace(/~1/g, '/').replace(/~0/g, '~'); }
@@ -3921,8 +3945,8 @@ function getActiveLaneOfGroup(g) {
 }
 
 function refreshMetaBodies() {
-  for (const t of tracks) { if (t.metaPanel && t.metaPanel.body) setMetaBody(t.metaPanel.body, t.meta); }
-  for (const g of groups) { const active = getActiveLaneOfGroup(g); if (g.metaPanel && g.metaPanel.body) setMetaBody(g.metaPanel.body, active ? active.meta : null); }
+  for (const t of tracks) { if (t.metaPanel && t.metaPanel.body) setMetaBody(t.metaPanel.body, resolvedTrackMeta(t)); }
+  for (const g of groups) { const active = getActiveLaneOfGroup(g); if (g.metaPanel && g.metaPanel.body) setMetaBody(g.metaPanel.body, active ? resolvedTrackMeta(active) : null); }
   for (const jc of jsonCards) setMetaBody(jc.panel.body, metaMap.get(jc.key) ?? null);
   updateMetaHeads();
 }
@@ -4182,15 +4206,15 @@ function metaElNearViewport(el) {
 }
 function refreshMetaWindow() {
   for (const t of tracks) {
-    if (!t.metaPanel || !t.meta) continue;
-    if (metaElNearViewport(t.el)) setMetaBody(t.metaPanel.body, t.meta);
+    if (!t.metaPanel) continue;
+    if (metaElNearViewport(t.el)) setMetaBody(t.metaPanel.body, resolvedTrackMeta(t));
   }
   for (const g of groups) {
     const card = g.el;
     if (!card || !g.metaPanel) continue;
     if (!metaElNearViewport(card)) { g.metaPanel.body._metaLast = null; continue; }
     const active = getActiveLaneOfGroup(g);
-    setMetaBody(g.metaPanel.body, active ? active.meta : null);
+    setMetaBody(g.metaPanel.body, active ? resolvedTrackMeta(active) : null);
   }
   for (const jc of jsonCards) {
     if (metaElNearViewport(jc.card)) setMetaBody(jc.panel.body, metaMap.get(jc.key) ?? null);
@@ -4203,7 +4227,7 @@ function refreshMetaPanels() {
     if (!card || !g.metaPanel) continue;
     if (!metaElNearViewport(card)) { g.metaPanel.body._metaLast = null; continue; }
     const active = getActiveLaneOfGroup(g);
-    setMetaBody(g.metaPanel.body, active ? active.meta : null);
+    setMetaBody(g.metaPanel.body, active ? resolvedTrackMeta(active) : null);
   }
 }
 
