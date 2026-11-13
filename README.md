@@ -24,6 +24,7 @@ Co-developed across two repositories:
 - **Multichannel Playback** — stereo/multichannel files (2–8ch) expand to one lane per channel with per-channel **Mute**; all channels are mixed by default and any combination can be muted
 - **ML Audio Classification** — CED-tiny ONNX model (527 AudioSet labels); Analyze All / Group / per-track
 - **Track Management** — Delete key or × button; card position preserved on deletion/merge
+- **Sample Search** — `Ctrl+F` (or the toolbar Search button) opens a palette to find any track by name or path, including files not yet rendered by the lazy loader; selecting a result smooth-scrolls to the card and pulses a highlight
 - **Card Navigation** — Up/Down arrow keys with smooth scrolling
 - **Auto-Pause** — playback pauses when tab/panel loses focus
 
@@ -52,6 +53,7 @@ Try the live demo at https://richermans.github.io/SpecView/ or https://xingws.gi
 | `Shift + ←` | Reset zoom (fit all) |
 | `Delete` | Remove active track (or remove lane from group) |
 | `Backspace` | Jump to start (second 0) |
+| `Ctrl + F` | Search samples by name or path (`↑`/`↓` choose, `Enter` jump, `Esc` close) |
 
 ## VS Code Extension
 

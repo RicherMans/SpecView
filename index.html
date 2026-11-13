@@ -50,6 +50,8 @@ body {
   border-bottom: 1px solid var(--border);
   gap: 6px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  row-gap: 4px;
   z-index: 100;
 }
 .toolbar .logo {
@@ -83,6 +85,7 @@ body {
 .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
 .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .btn-icon { font-size: 12px; }
+#btn-search { padding: 4px 9px; }
 .spacer { flex: 1; }
 
 .time-display {
@@ -560,6 +563,121 @@ body.playback .playhead, body.playback .wf-playhead {
   transition: opacity .2s, transform .2s;
 }
 .stream-prog.show { opacity: 1; transform: translateY(0); }
+
+/* ===== SAMPLE SEARCH (Ctrl+F) ===== */
+.search-overlay {
+  position: fixed; inset: 0; z-index: 3000;
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 64px 16px 16px;
+  background: rgba(15,23,42,0.18);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.search-overlay[hidden] { display: none; }
+.search-palette {
+  width: min(620px, 100%);
+  max-height: min(70vh, 560px);
+  display: flex; flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.10);
+  overflow: hidden;
+  animation: searchPaletteIn .16s ease-out;
+}
+@keyframes searchPaletteIn {
+  from { opacity: 0; transform: translateY(-6px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+.search-input-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--border-light);
+}
+.search-glyph { display: flex; align-items: center; font-size: 14px; color: var(--text-dim); }
+#btn-search svg { display: block; }
+#search-input {
+  flex: 1; min-width: 0;
+  border: none; outline: none; background: transparent;
+  font-family: inherit; font-size: 14px; color: var(--text);
+  user-select: text;
+}
+#search-input::placeholder { color: var(--text-sub); }
+.search-count { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.search-close {
+  border: none; background: none; color: var(--text-sub);
+  font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px;
+  border-radius: 3px; transition: color .12s;
+}
+.search-close:hover { color: var(--red); }
+.search-results { overflow-y: auto; padding: 6px; min-height: 44px; }
+.search-result {
+  padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  border: 1px solid transparent;
+  transition: background .1s, border-color .1s;
+}
+.search-result.selected {
+  background: var(--accent-glow);
+  border-color: var(--accent-light);
+}
+.search-result-main { display: flex; align-items: center; gap: 8px; }
+.search-result-name {
+  flex: 1; min-width: 0;
+  font-size: 12.5px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.search-result-name mark,
+.search-result-path mark {
+  background: rgba(59,130,246,0.22); color: inherit;
+  border-radius: 2px; padding: 0 1px;
+}
+.search-result-badge {
+  font-size: 9px; font-weight: 700; letter-spacing: .3px;
+  color: var(--accent); background: rgba(59,130,246,0.1);
+  border: 1px solid rgba(59,130,246,0.25);
+  border-radius: 3px; padding: 1px 5px;
+}
+.search-result-path {
+  margin-top: 1px;
+  font-size: 10.5px; color: var(--text-dim);
+  font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.search-empty {
+  padding: 16px 12px; text-align: center;
+  font-size: 12px; color: var(--text-dim);
+}
+.search-footer {
+  display: flex; gap: 14px; padding: 7px 12px;
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-header);
+  font-size: 10.5px; color: var(--text-dim);
+}
+.search-footer kbd {
+  font-family: inherit; font-size: 10px; color: var(--text);
+  border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 3px; padding: 0 4px; background: var(--bg-card);
+}
+
+/* Glow pulse shown after jumping to a search result. The class is removed by
+   the search code once the animation finishes. */
+.card.card-flash { animation: cardFlash 1.35s ease-out; }
+@keyframes cardFlash {
+  0%   { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow), 0 1px 3px rgba(0,0,0,0.06); }
+  18%  { border-color: var(--accent-light); box-shadow: 0 0 0 4px rgba(59,130,246,0.30), 0 0 22px 4px rgba(59,130,246,0.35); }
+  55%  { border-color: var(--accent-light); box-shadow: 0 0 0 3px rgba(59,130,246,0.18), 0 0 14px 2px rgba(59,130,246,0.20); }
+  100% { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow), 0 1px 4px rgba(0,0,0,0.08); }
+}
+.card.card-flash .card-header { animation: cardHeaderFlash 1.35s ease-out; }
+@keyframes cardHeaderFlash {
+  0%   { background: var(--bg-header); }
+  18%  { background: rgba(59,130,246,0.16); }
+  100% { background: var(--bg-header); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .search-palette { animation: none; }
+  .card.card-flash,
+  .card.card-flash .card-header { animation: none; }
+}
 </style>
 </head>
 <body>
@@ -585,6 +703,8 @@ body.playback .playhead, body.playback .wf-playhead {
   <button class="btn" id="btn-zoom-out" disabled title="Zoom Out (Shift+Down)">&#8211;</button>
   <button class="btn" id="btn-zoom-fit" disabled title="Fit All (Shift+Left)">Fit</button>
   <div class="sep"></div>
+  <button class="btn" id="btn-search" disabled title="Search samples (Ctrl+F)" aria-label="Search samples"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></svg></button>
+  <div class="sep"></div>
   <button class="btn" id="btn-analyze-all" disabled>Analyze All</button>
   <div class="sep"></div>
   <button class="btn active" id="btn-grouping" title="Toggle automatic diff grouping">Grouping: On</button>
@@ -598,6 +718,23 @@ body.playback .playhead, body.playback .wf-playhead {
   </label>
   <div class="sep"></div>
   <button class="btn" id="btn-clear">Clear All</button>
+</div>
+
+<div class="search-overlay" id="search-overlay" hidden>
+  <div class="search-palette" role="dialog" aria-label="Search samples">
+    <div class="search-input-row">
+      <span class="search-glyph"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 14 14"/></svg></span>
+      <input type="text" id="search-input" placeholder="Search samples by name or path&hellip;" aria-label="Search samples by name or path" autocomplete="off" spellcheck="false">
+      <span class="search-count" id="search-count" aria-live="polite"></span>
+      <button class="search-close" id="search-close" title="Close (Esc)">&times;</button>
+    </div>
+    <div class="search-results" id="search-results"></div>
+    <div class="search-footer">
+      <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate</span>
+      <span><kbd>Enter</kbd> jump</span>
+      <span><kbd>Esc</kbd> close</span>
+    </div>
+  </div>
 </div>
 
 <div id="drop-zone" class="empty">
@@ -698,6 +835,12 @@ const btnPlay   = document.getElementById('btn-play');
 const btnStop   = document.getElementById('btn-stop');
 const btnClear  = document.getElementById('btn-clear');
 const btnAnalyzeAll = document.getElementById('btn-analyze-all');
+const btnSearch = document.getElementById('btn-search');
+const searchOverlay = document.getElementById('search-overlay');
+const searchInput = document.getElementById('search-input');
+const searchResults = document.getElementById('search-results');
+const searchCount = document.getElementById('search-count');
+const searchClose = document.getElementById('search-close');
 const btnGrouping = document.getElementById('btn-grouping');
 const btnZoomIn = document.getElementById('btn-zoom-in');
 const btnZoomOut = document.getElementById('btn-zoom-out');
@@ -847,7 +990,12 @@ function unwatchPaint(t) {
 const sentinelObserver = new IntersectionObserver(entries => {
   if (entries.some(e => e.isIntersecting)) renderWindow(SCROLL_BATCH);
 }, { root: tracksBox, rootMargin: '2000px 0px' });
+/* Set true while a search jump re-anchors the virtual window; without it the
+   top sentinel would immediately re-materialize a batch above the target
+   (the jump starts at the top of a one-card window) and push it out of view. */
+let suppressTopRestore = false;
 const topObserver = new IntersectionObserver(entries => {
+  if (suppressTopRestore) return;
   if (entries.some(e => e.isIntersecting)) restoreTop(SCROLL_BATCH);
 }, { root: tracksBox, rootMargin: '2000px 0px' });
 
@@ -4695,6 +4843,7 @@ function addFreqLabels(el, ny) {
  *  UI
  * ======================================================================== */
 function clearAll() {
+  if (searchOpen) closeSearch();
   clearEpoch++;              /* invalidate queued/in-flight lazy loads */
   groupingBusy = false;
   stopAll();
@@ -4722,6 +4871,7 @@ function refreshUI() {
   dropZone.querySelector('.dz-text').textContent =
     has ? '+ Add more audio files or archives' : 'Drop audio files or .tar/.tar.gz archives here, or click to browse';
   btnPlay.disabled = !has; btnStop.disabled = !has; btnZoomIn.disabled = !has; btnZoomOut.disabled = !has; btnZoomFit.disabled = !has; btnAnalyzeAll.disabled = !has;
+  btnSearch.disabled = !has;
   updateGroupingUI();
   highlightActive(); updateLaneHighlights(); updateTimeDisplay();
   ensureStandaloneJsonCards();
@@ -4858,6 +5008,316 @@ function highlightActive() {
   if (!activeTrackId && tracks.length) activeTrackId = tracks[0].id;
   const t = getActive();
   if (t && t.el) t.el.classList.add('active');
+}
+
+/* ========================================================================
+ *  SAMPLE SEARCH  (Ctrl+F, or the toolbar Search button)
+ *
+ *  Cards are virtualized: with a large library most samples are not in the
+ *  DOM (their descriptors sit in pendingCards / releasedTop), so the index is
+ *  built from live tracks *and* those descriptors. Selecting a result either
+ *  activates the existing card or re-anchors the virtual window on the target
+ *  descriptor, then scrolls to it and plays a short accent-glow pulse.
+ * ======================================================================== */
+const SEARCH_RENDER_MAX = 120;   // result rows rendered at once
+const SEARCH_MAX_RENDER_STEPS = 400;  // safety cap when playback pins cards
+
+let searchOpen = false;
+let searchSel = -1;
+let searchEntries = [];       // currently rendered result entries
+let searchIndex = [];         // all searchable samples for this session
+let searchReturnFocus = null;
+
+function allCardDescriptors() {
+  return releasedTop.concat(renderedCards, pendingCards);
+}
+
+/* Build a flat index of every sample, whether its card is rendered or not.
+   Walking the card descriptors (rather than the `tracks` array) keeps results
+   in display order — restored cards are appended to `tracks` out of order. */
+function buildSearchIndex() {
+  const out = [];
+  const flat = allCardDescriptors();
+  const coveredTracks = new Set();
+
+  flat.forEach((d, di) => {
+    const baseOrder = di * 1000;
+    if (d._el && d._el.isConnected) {
+      const cardTracks = tracks.filter(t => t.el === d._el);
+      cardTracks.forEach((t, ti) => {
+        coveredTracks.add(t.id);
+        out.push({
+          name: t.name, path: t.filePath || '',
+          group: cardTracks.length > 1 || t.groupId != null,
+          order: baseOrder + ti, trackId: t.id, cardEl: t.el,
+        });
+      });
+      return;
+    }
+    const items = d.items || [];
+    items.forEach((it, ii) => {
+      out.push({
+        name: it.name || '', path: it.filePath || '',
+        group: items.length >= 2, order: baseOrder + ii,
+        desc: d, itemIndex: ii,
+      });
+    });
+  });
+
+  /* Safety net for any live card that has no descriptor (e.g. a state left
+     behind by a merge/regroup); keep it searchable at the end. */
+  tracks.forEach((t, ti) => {
+    if (coveredTracks.has(t.id)) return;
+    out.push({
+      name: t.name, path: t.filePath || '', group: t.groupId != null,
+      order: 1e9 + ti, trackId: t.id, cardEl: t.el,
+    });
+  });
+  return out;
+}
+
+function searchPathLabel(filePath) {
+  if (!filePath) return '';
+  return filePath.replace(/\n/g, ' \u203a ').replace(/\\/g, '/');
+}
+
+function searchScore(entry, q, tokens) {
+  const n = entry.name.toLowerCase();
+  const p = entry.path.toLowerCase();
+  let score = 0;
+  if (n === q) score += 1000;
+  else if (n.startsWith(q)) score += 700;
+  else if (n.includes(q)) score += 520;
+  else if (p.includes(q)) score += 120;
+  for (const tok of tokens) {
+    if (n.includes(tok)) score += 55;
+    else if (p.includes(tok)) score += 12;
+    else return -1;
+  }
+  return score;
+}
+
+/* Escape `text`, wrapping the first case-insensitive occurrence of `query`
+   in <mark> for a subtle match highlight. */
+function searchHighlight(text, query) {
+  if (!query) return esc(text);
+  const i = text.toLowerCase().indexOf(query.toLowerCase());
+  if (i < 0) return esc(text);
+  return esc(text.slice(0, i)) +
+    '<mark>' + esc(text.slice(i, i + query.length)) + '</mark>' +
+    esc(text.slice(i + query.length));
+}
+
+function renderSearchResults(resetSelection) {
+  const raw = searchInput.value;
+  const q = raw.trim().toLowerCase();
+  const tokens = q ? q.split(/\s+/) : [];
+  const matches = [];
+  for (const e of searchIndex) {
+    if (!q) { matches.push({ e, score: 0 }); continue; }
+    const score = searchScore(e, q, tokens);
+    if (score >= 0) matches.push({ e, score });
+  }
+  if (q) matches.sort((a, b) => b.score - a.score || a.e.order - b.e.order);
+
+  const total = matches.length;
+  searchEntries = matches.slice(0, SEARCH_RENDER_MAX).map(m => m.e);
+  searchResults.innerHTML = '';
+
+  if (!total) {
+    const empty = document.createElement('div');
+    empty.className = 'search-empty';
+    empty.textContent = searchIndex.length
+      ? 'No samples match \u201c' + raw.trim() + '\u201d'
+      : 'No samples loaded yet';
+    searchResults.appendChild(empty);
+    searchCount.textContent = '';
+    searchSel = -1;
+    return;
+  }
+
+  searchCount.textContent = total > searchEntries.length
+    ? searchEntries.length + ' of ' + total
+    : total + (total === 1 ? ' sample' : ' samples');
+
+  const frag = document.createDocumentFragment();
+  searchEntries.forEach((e, i) => {
+    const row = document.createElement('div');
+    row.className = 'search-result';
+    row.dataset.index = String(i);
+    row.innerHTML =
+      '<div class="search-result-main">' +
+        '<span class="search-result-name">' + searchHighlight(e.name, q) + '</span>' +
+        (e.group ? '<span class="search-result-badge">DIFF</span>' : '') +
+      '</div>' +
+      (e.path ? '<div class="search-result-path">' + searchHighlight(searchPathLabel(e.path), q) + '</div>' : '');
+    row.addEventListener('click', () => selectSearchResult(i));
+    row.addEventListener('mouseenter', () => {
+      if (searchSel !== i) { searchSel = i; updateSearchSelection(false); }
+    });
+    frag.appendChild(row);
+  });
+  searchResults.appendChild(frag);
+
+  if (resetSelection || searchSel < 0 || searchSel >= searchEntries.length) searchSel = 0;
+  updateSearchSelection(true);
+}
+
+function updateSearchSelection(scroll) {
+  const rows = searchResults.children;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].classList) rows[i].classList.toggle('selected', i === searchSel);
+  }
+  if (scroll && searchSel >= 0 && rows[searchSel]) {
+    rows[searchSel].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function moveSearchSelection(delta) {
+  const n = searchEntries.length;
+  if (!n) return;
+  searchSel = searchSel < 0
+    ? (delta > 0 ? 0 : n - 1)
+    : (searchSel + delta + n) % n;
+  updateSearchSelection(true);
+}
+
+function openSearch() {
+  if (searchOpen) { searchInput.focus(); searchInput.select(); return; }
+  searchOpen = true;
+  searchReturnFocus = document.activeElement;
+  searchIndex = buildSearchIndex();
+  searchInput.value = '';
+  searchSel = -1;
+  searchOverlay.hidden = false;
+  renderSearchResults(true);
+  searchInput.focus();
+}
+
+function closeSearch() {
+  if (!searchOpen) return;
+  searchOpen = false;
+  searchOverlay.hidden = true;
+  searchResults.innerHTML = '';
+  searchEntries = [];
+  searchIndex = [];
+  searchSel = -1;
+  const back = searchReturnFocus;
+  searchReturnFocus = null;
+  if (back && back.isConnected && typeof back.focus === 'function') {
+    try { back.focus(); } catch (e) {}
+  }
+}
+
+function prefReduceMotion() {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (e) { return false; }
+}
+
+function flashAndScrollCard(el, skipScroll) {
+  if (!el) return;
+  const apply = () => {
+    if (!skipScroll) {
+      el.scrollIntoView({ behavior: prefReduceMotion() ? 'auto' : 'smooth', block: 'center' });
+    }
+    el.classList.remove('card-flash');
+    void el.offsetWidth;   /* restart the animation on repeat jumps */
+    el.classList.add('card-flash');
+    clearTimeout(el._flashTimer);
+    el._flashTimer = setTimeout(() => el.classList.remove('card-flash'), 1500);
+  };
+  /* Jumped cards are already positioned; start the pulse right away so heavy
+     decoding of the freshly materialized cards cannot delay it. */
+  if (skipScroll) apply();
+  else requestAnimationFrame(apply);
+}
+
+function hasPinnedCards() {
+  return tracks.some(t => t.playing || (t.analysisResults && t.analysisResults.length));
+}
+
+/* Find the live track that a (just materialized) descriptor item maps to. */
+function trackInDescriptorCard(d, item) {
+  const inCard = tracks.filter(t => d._el && t.el === d._el);
+  if (!inCard.length) return null;
+  return inCard.find(t => t.name === item.name &&
+      (t.filePath || '') === (item.filePath || '')) ||
+    inCard.find(t => t.name === item.name) || inCard[0];
+}
+
+/* Re-anchor the virtual window so `d` is the rendered card at the top of the
+   window. Cards before it become recyclable top entries and everything from
+   the target on stays pending, preserving the original order for scroll-up /
+   scroll-down. */
+function revealDescriptor(d) {
+  const flat = allCardDescriptors();
+  const idx = flat.indexOf(d);
+  if (idx < 0) return false;
+
+  if (!hasPinnedCards()) {
+    suppressTopRestore = true;
+    for (const r of renderedCards) {
+      if (r._el) { removeCardByEl(r._el); r._el = null; }
+      releaseDescriptorBuffers(r);
+    }
+    renderedCards = [];
+    releasedTop = flat.slice(0, idx);
+    pendingCards = flat.slice(idx);
+    for (const r of releasedTop) r._el = null;
+    renderWindow(1);
+
+    const el = d._el;
+    if (el) {
+      /* Materialize one batch of earlier cards so the target is not the very
+         first element (the top sentinel would otherwise sit in view), then
+         land on it instantly — a cross-library jump is a teleport, not a
+         scroll. Further batches restore on scroll-up as usual. */
+      if (releasedTop.length) restoreTop(SCROLL_BATCH);
+      const contRect = tracksBox.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      tracksBox.scrollTop += elRect.top - contRect.top -
+        Math.max(0, (contRect.height - elRect.height) / 2);
+      requestAnimationFrame(() => requestAnimationFrame(() => { suppressTopRestore = false; }));
+    } else {
+      suppressTopRestore = false;
+    }
+    return !!el;
+  }
+
+  /* A card is playing or holds analysis results and must stay in the DOM;
+     materialize the target incrementally instead of rebuilding the window. */
+  let guard = 0;
+  while (!d._el && guard++ < SEARCH_MAX_RENDER_STEPS) {
+    if (pendingCards.includes(d)) renderWindow(SCROLL_BATCH);
+    else if (releasedTop.includes(d)) restoreTop(SCROLL_BATCH);
+    else break;
+  }
+  return !!d._el;
+}
+
+function revealSearchEntry(e) {
+  if (e.trackId != null) {
+    const t = tracks.find(tr => tr.id === e.trackId);
+    if (t && t.el) { setActive(t.id); flashAndScrollCard(t.el); return; }
+  }
+  const d = e.desc;
+  if (!d) return;
+  const item = (d.items || [])[e.itemIndex || 0] || { name: e.name, filePath: e.path };
+  const wasRendered = !!(d._el && d._el.isConnected);
+
+  if (!wasRendered && !revealDescriptor(d)) return;
+
+  const t = trackInDescriptorCard(d, item);
+  if (t) setActive(t.id);
+  flashAndScrollCard(d._el, !wasRendered);
+}
+
+function selectSearchResult(i) {
+  const e = searchEntries[i];
+  if (!e) return;
+  closeSearch();
+  revealSearchEntry(e);
 }
 
 /* ========================================================================
@@ -5546,7 +6006,29 @@ document.addEventListener('click', e => {
 });
 btnClear.addEventListener('click',clearAll);
 
+/* Sample search: toolbar button, Ctrl+F, and palette navigation keys. */
+btnSearch.addEventListener('click', openSearch);
+searchClose.addEventListener('click', closeSearch);
+searchOverlay.addEventListener('mousedown', e => { if (e.target === searchOverlay) closeSearch(); });
+searchInput.addEventListener('input', () => renderSearchResults(true));
+document.addEventListener('keydown', e => {
+  const ctrl = e.ctrlKey || e.metaKey;
+  /* Ctrl+F — override the browser/Electron find bar. */
+  if (ctrl && !e.shiftKey && !e.altKey && e.code === 'KeyF') {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    openSearch();
+    return;
+  }
+  if (!searchOpen) return;
+  if (e.code === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); closeSearch(); return; }
+  if (e.code === 'ArrowDown') { e.preventDefault(); moveSearchSelection(1); return; }
+  if (e.code === 'ArrowUp') { e.preventDefault(); moveSearchSelection(-1); return; }
+  if (e.code === 'Enter') { e.preventDefault(); selectSearchResult(searchSel); return; }
+});
+
 document.addEventListener('keydown',e=>{
+  if (searchOpen) return;
   if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
   /* Zoom shortcuts: Shift+Up/Down/Left */
   if(e.shiftKey && e.code==='ArrowUp'){e.preventDefault();zoomIn();return;}
