@@ -848,7 +848,7 @@ const btnZoomIn = document.getElementById('btn-zoom-in');
 const btnZoomOut = document.getElementById('btn-zoom-out');
 const btnZoomFit = document.getElementById('btn-zoom-fit');
 const timeDisp  = document.getElementById('time-display');
-let timeDispSeconds = false;
+let timeDispSeconds = (() => { try { return localStorage.getItem('specview-time-seconds') === '1'; } catch (e) { return false; } })();
 const playIcon  = document.getElementById('play-icon');
 const playLabel = document.getElementById('play-label');
 const volSlider = document.getElementById('vol-slider');
@@ -5988,7 +5988,7 @@ document.addEventListener('dragleave',e=>{e.preventDefault();dragCounter--;if(dr
 document.addEventListener('dragover',e=>{e.preventDefault();});
 document.addEventListener('drop',e=>{e.preventDefault();dragCounter=0;dropOverlay.classList.remove('visible');processDroppedEntries(e.dataTransfer);});
 
-timeDisp.addEventListener('click',()=>{ timeDispSeconds=!timeDispSeconds; updateTimeDisplay(); });
+timeDisp.addEventListener('click',()=>{ timeDispSeconds=!timeDispSeconds; try{ localStorage.setItem('specview-time-seconds', timeDispSeconds?'1':'0'); }catch(e){} updateTimeDisplay(); });
 btnPlay.addEventListener('click',togglePlay);
 btnStop.addEventListener('click',stopAll);
 btnZoomIn.addEventListener('click', zoomIn);
@@ -6077,6 +6077,7 @@ window.addEventListener('unhandledrejection', (e) => { _surfaceError('Promise er
 })();
 
 refreshUI();
+updateTimeDisplay();
 })();
 </script>
 </body>
