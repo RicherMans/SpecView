@@ -99,6 +99,8 @@ body {
   min-width: 175px;
   text-align: center;
   letter-spacing: 0.3px;
+  cursor: pointer;
+  user-select: none;
 }
 
 .vol-group { display: flex; align-items: center; gap: 5px; }
@@ -692,7 +694,7 @@ body.playback .playhead, body.playback .wf-playhead {
     <span class="btn-icon">&#9632;</span> Stop
   </button>
   <div class="sep"></div>
-  <span class="time-display" id="time-display">0:00.000 / 0:00.000</span>
+  <span class="time-display" id="time-display" title="Click to toggle seconds">0:00.000 / 0:00.000</span>
   <span class="spacer"></span>
   <div class="vol-group">
     <label>Vol</label>
@@ -846,6 +848,7 @@ const btnZoomIn = document.getElementById('btn-zoom-in');
 const btnZoomOut = document.getElementById('btn-zoom-out');
 const btnZoomFit = document.getElementById('btn-zoom-fit');
 const timeDisp  = document.getElementById('time-display');
+let timeDispSeconds = false;
 const playIcon  = document.getElementById('play-icon');
 const playLabel = document.getElementById('play-label');
 const volSlider = document.getElementById('vol-slider');
@@ -5518,7 +5521,7 @@ function updatePlayheads() {
   }
 }
 
-function updateTimeDisplay() { const t=getActive(); timeDisp.textContent=t?fmt(getPos(t))+' / '+fmt(t.duration):'0:00.000 / 0:00.000'; }
+function updateTimeDisplay() { const t=getActive(), f=timeDispSeconds?fmtSeconds:fmt; timeDisp.textContent=t?f(getPos(t))+' / '+f(t.duration):f(0)+' / '+f(0); }
 function updatePlayBtn(p){ document.body.classList.toggle('playback', !!p); playIcon.innerHTML=p?'&#10074;&#10074;':'&#9654;'; playLabel.textContent=p?'Pause':'Play'; }
 
 /* ========================================================================
@@ -5526,6 +5529,7 @@ function updatePlayBtn(p){ document.body.classList.toggle('playback', !!p); play
  * ======================================================================== */
 function fmt(s){ if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60),sc=s%60; return m+':'+(sc<10?'0':'')+sc.toFixed(3); }
 function fmtShort(s){ if(!isFinite(s)||s<0) s=0; const m=Math.floor(s/60),sc=s%60; return m>0?m+':'+(sc<10?'0':'')+sc.toFixed(1):sc.toFixed(1)+'s'; }
+function fmtSeconds(s){ if(!isFinite(s)||s<0) s=0; return s.toFixed(2); }
 function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 /* ========================================================================
@@ -5984,6 +5988,7 @@ document.addEventListener('dragleave',e=>{e.preventDefault();dragCounter--;if(dr
 document.addEventListener('dragover',e=>{e.preventDefault();});
 document.addEventListener('drop',e=>{e.preventDefault();dragCounter=0;dropOverlay.classList.remove('visible');processDroppedEntries(e.dataTransfer);});
 
+timeDisp.addEventListener('click',()=>{ timeDispSeconds=!timeDispSeconds; updateTimeDisplay(); });
 btnPlay.addEventListener('click',togglePlay);
 btnStop.addEventListener('click',stopAll);
 btnZoomIn.addEventListener('click', zoomIn);
